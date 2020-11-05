@@ -229,7 +229,7 @@ class TrackCount(object):
                                            self.std_group[ci],
                                            self.framed_metas, self.count[ci],
                                            self.iou_threshold_list[ci],
-                                           self.person_id_old[ci], [],
+                                           self.person_id_old[ci], 0,
                                            x_y_threshold=self.x_y_threshold,
                                            activate_kalman_filter=self.activate_kalman_filter)
         self.old_rois[ci], self.old_trajectory_stat[ci], self.old_std_value[ci], \
@@ -338,8 +338,7 @@ class TrackCount(object):
                                                                  self.old_percentage[ci], _kept_id,
                                                                  counting=True,
                                                                  activate_kalman_filter=self.activate_kalman_filter)
-        self.old_rois[ci], self.old_trajectory_stat[ci], self.old_feature_embedding[ci], \
-            self.old_anchor_index[ci], self.old_std_value[ci], self.person_id_old[ci], \
+        self.old_rois[ci], self.old_trajectory_stat[ci], self.old_std_value[ci], self.person_id_old[ci], \
             self.old_percentage[ci] = update_state_after_remove
 
     def remove_disappeared_objects(self, kf_removed_index):
@@ -557,7 +556,7 @@ class TrackCount(object):
                     if save_video:
                         video_writer.write((_im_annotate * 255.0).astype('uint8'))
                 if iterr % (save_box_stat - 1) == 0:
-                    if iterr != 0 and stat_folder:
+                    if iterr != 0 and stat_folder and iterr > 40:
                         video_stat.append([self.pedestrian_id_group, self.bike_id_group, self.car_id_group])
                         pickle.dump(video_stat,
                                     open(stat_folder + "/%d" % iterr, 'wb'))
