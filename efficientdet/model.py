@@ -337,8 +337,8 @@ class Regressor(nn.Module):
 
         feats = torch.cat(feats, dim=1)
         return feats
-    
-    
+
+
 class RegressorMultiHeads(nn.Module):
     """
     modified by Zylo117
@@ -365,10 +365,10 @@ class RegressorMultiHeads(nn.Module):
                 feat = conv(feat)
                 feat = bn(feat)
                 feat = self.swish(feat)
-                
+
             _f_h = self.header(feat)
             _f_f = self.header_future(feat)
-            
+
             for iterr, _f_ in enumerate([_f_h, _f_f]):
                 _f_ = _f_.permute(0, 2, 3, 1)
                 _f_ = _f_.contiguous().view(_f_.shape[0], -1, 4)
@@ -377,8 +377,8 @@ class RegressorMultiHeads(nn.Module):
         feats_history = torch.cat(feats_history, dim=1)
         feats_future = torch.cat(feats_future, dim=1)
         return feats_history, feats_future
-    
-    
+
+
 class RegressorMultiHeadsBoxLevel(nn.Module):
     """
     modified by Zylo117
@@ -405,20 +405,20 @@ class RegressorMultiHeadsBoxLevel(nn.Module):
                 feat = conv(feat)
                 feat = bn(feat)
                 feat = self.swish(feat)
-                
+
             _f_h = self.header(feat)
             _f_h = _f_h.permute(0, 2, 3, 1)  # [batch_size, fh, fw, num_anchors * 4]    
             _f_f = self.header_future(_f_h)  # [batch_size, fh, fw, num_anchors * 4]
-            
+
             for iterr, _f_ in enumerate([_f_h, _f_f]):
                 _f_ = _f_.contiguous().view(_f_.shape[0], -1, 4)  # [batch_size, fh * fw * num_anchors, 4]
                 feats_group[iterr].append(_f_)
-                
+
         feats_history, feats_future = feats_group
         feats_history = torch.cat(feats_history, dim=1)
         feats_future = torch.cat(feats_future, dim=1)
         return feats_history, feats_future
-    
+
 
 class Classifier(nn.Module):
     """
@@ -458,7 +458,7 @@ class Classifier(nn.Module):
         feats = feats.sigmoid()
 
         return feats
-    
+
     def forward_test(self, inputs):
         feats = []
         cla_feats = []
@@ -467,10 +467,9 @@ class Classifier(nn.Module):
                 feat = conv(feat)
                 feat = bn(feat)
                 feat = self.swish(feat)
-            cla_feats.append(feat)            
+            cla_feats.append(feat)
             feat = self.header(feat)
-            
-            
+
             feat = feat.permute(0, 2, 3, 1)
             feat = feat.contiguous().view(feat.shape[0], feat.shape[1], feat.shape[2], self.num_anchors,
                                           self.num_classes)
@@ -482,13 +481,13 @@ class Classifier(nn.Module):
         feats = feats.sigmoid()
 
         return feats, cla_feats
-        
-    
-    
+
+
 class ClassifierMultiHeads(nn.Module):
     """This function is similar to the previous one
     The only difference is that here it has multiple heads for both bbox regression and bbox prediction
     """
+
     def __init__(self, in_channels, num_anchors, num_classes, num_layers, onnx_export=False):
         super(ClassifierMultiHeads, self).__init__()
         self.num_anchors = num_anchors
@@ -514,10 +513,10 @@ class ClassifierMultiHeads(nn.Module):
                 feat = conv(feat)
                 feat = bn(feat)
                 feat = self.swish(feat)
-            
+
             _f_h = self.header(feat)
             _f_f = self.header_future(feat)
-            
+
             for iterr, _f_ in enumerate([_f_h, _f_f]):
                 _f_ = _f_.permute(0, 2, 3, 1)
                 _f_ = _f_.contiguous().view(_f_.shape[0], _f_.shape[1], _f_.shape[2], self.num_anchors,
@@ -529,11 +528,12 @@ class ClassifierMultiHeads(nn.Module):
         feats_future = torch.cat(feats_future, dim=1).sigmoid()
         return feats_history, feats_future
 
-    
+
 class ClassifierMultiHeadsBoxLevel(nn.Module):
     """This function is similar to the previous one
     The only difference is that here it has multiple heads for both bbox regression and bbox prediction
     """
+
     def __init__(self, in_channels, num_anchors, num_classes, num_layers, onnx_export=False):
         super(ClassifierMultiHeadsBoxLevel, self).__init__()
         self.num_anchors = num_anchors
@@ -559,7 +559,7 @@ class ClassifierMultiHeadsBoxLevel(nn.Module):
                 feat = conv(feat)
                 feat = bn(feat)
                 feat = self.swish(feat)
-            
+
             _f_h = self.header(feat)
             _f_h = _f_h.permute(0, 2, 3, 1)  # [batch_size, fh, fw, num_anchors * num_class]
             _f_f = self.header_future(_f_h)
@@ -572,7 +572,6 @@ class ClassifierMultiHeadsBoxLevel(nn.Module):
         feats_history = torch.cat(feats_history, dim=1).sigmoid()
         feats_future = torch.cat(feats_future, dim=1).sigmoid()
         return feats_history, feats_future
-
 
 
 class EfficientNet(nn.Module):

@@ -1,5 +1,4 @@
 import numpy as np
-import os
 
 
 def assign_count_index(id_group, class_name, movement_string):
@@ -8,10 +7,10 @@ def assign_count_index(id_group, class_name, movement_string):
     move_value = np.array([id_use[key][0] for key in keys_group])
     if not movement_string:
         movement_string = ["up", "down", "left", "right"]
-    for _direc_index, single_direc in enumerate(movement_string):    
+    for _direc_index, single_direc in enumerate(movement_string):
         _subindex = np.where(move_value == single_direc)[0]
         for iterr, single_index in enumerate(_subindex):
-            _temp = [class_name, _direc_index + 1, single_direc, iterr+1]
+            _temp = [class_name, _direc_index + 1, single_direc, iterr + 1]
             id_use[keys_group[single_index]] = _temp
     return id_use
 
@@ -42,7 +41,7 @@ def rearrange_stat(stat_original, only_person, class_group, algo, movement_strin
         num_id = [id_car_numeric]
     elif only_person is "ped_car":
         tot_id = [tot_id_ped_bike, tot_id_car]
-        num_id = [id_ped_bike_numeric, id_car_numeric]      
+        num_id = [id_ped_bike_numeric, id_car_numeric]
     if return_concat_id:
         return tot_id, num_id
     count_stat_frameindex = []
@@ -50,7 +49,7 @@ def rearrange_stat(stat_original, only_person, class_group, algo, movement_strin
         for cls_index, single_class in enumerate(class_group):
             if "current_person_id_%s" % single_class in single_stat.keys():
                 q = single_stat["current_person_id_%s" % single_class]
-                direc_arrow = single_stat["direction_arrow_%s" % single_class]                    
+                direc_arrow = single_stat["direction_arrow_%s" % single_class]
                 count_id_move = np.zeros([len(q)])
                 identity = []
                 if len(q) > 0:
@@ -61,14 +60,16 @@ def rearrange_stat(stat_original, only_person, class_group, algo, movement_strin
                                 count_id_move[_qiter] = _va[-1]
                                 single_stat["direction_arrow_%s" % single_class][_qiter] = _va[1]
                                 identity.append(_va[0])
-                                count_stat_frameindex.append([single_stat["frame"], _q, movement_string[_va[1]], _va[0]])
+                                count_stat_frameindex.append(
+                                    [single_stat["frame"], _q, movement_string[_va[1]], _va[0]])
                         elif algo is "boundary":
                             if _q in num_id[cls_index] and direc_arrow[_qiter] != 0.0:
                                 _va = tot_id[cls_index]["id%d" % _q]
                                 count_id_move[_qiter] = _va[-1]
                                 single_stat["direction_arrow_%s" % single_class][_qiter] = _va[1]
                                 identity.append(_va[0])
-                                count_stat_frameindex.append([single_stat["frame"], _q, movement_string[_va[1]], _va[0]])
+                                count_stat_frameindex.append(
+                                    [single_stat["frame"], _q, movement_string[_va[1]], _va[0]])
 
             else:
                 count_id_move = []
@@ -79,7 +80,7 @@ def rearrange_stat(stat_original, only_person, class_group, algo, movement_strin
 
 
 def give_count(_stat_re, only_person, movement_string):
-    count_num = np.zeros([len(_stat_re)-1, 3, len(movement_string)])
+    count_num = np.zeros([len(_stat_re) - 1, 3, len(movement_string)])
     time_use = []
     for i, s_s in enumerate(_stat_re[:-1]):
         time_use.append(s_s['time'].strip().split(' ')[3])
@@ -95,18 +96,19 @@ def give_count(_stat_re, only_person, movement_string):
                 direc_subset = direction_arrow[direct_nonzero]
                 count_id = count_id[direct_nonzero]
                 for cls_index, _sname in enumerate(special_name):
-                    count_num[i, cls_index] = count_num[i-1, cls_index].copy()
+                    count_num[i, cls_index] = count_num[i - 1, cls_index].copy()
                     if len(iden) > 0:
                         _index = np.where(iden == _sname)[0]
                         if len(_index) > 0:
                             for _s_direc in np.unique(direc_subset[_index]):
-                                count_num[i, cls_index, int(_s_direc)] = np.max(count_id[_index][direc_subset[_index] == _s_direc])
-    if only_person != "person":                            
+                                count_num[i, cls_index, int(_s_direc)] = np.max(
+                                    count_id[_index][direc_subset[_index] == _s_direc])
+    if only_person != "person":
         for i, s_s in enumerate(_stat_re[:-1]):
             iden = np.array(s_s["identity_car"])
             direction_arrow = s_s["direction_arrow_car"]
             count_id = s_s["count_id_car"]
-            count_num[i, 2, :] = count_num[i-1, 2, :].copy()
+            count_num[i, 2, :] = count_num[i - 1, 2, :].copy()
             if len(count_id) > 0:
                 direct_nonzero = np.where(direction_arrow > 0)[0]
                 direc_subset = direction_arrow[direct_nonzero]

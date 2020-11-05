@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 class BBoxTransform(nn.Module):
     def forward(self, anchors, regression):
         """
@@ -136,7 +137,7 @@ class Anchors(nn.Module):
         # save it for later use to reduce overhead
         self.last_anchors[image.device] = anchor_boxes
         return anchor_boxes
-    
+
 
 def transform_anchor(anchor_subset, imsize, feature_size):
     """This function transforms the anchor value to a scale 
@@ -147,9 +148,6 @@ def transform_anchor(anchor_subset, imsize, feature_size):
     """
     scale = imsize / feature_size
     anchor_subset = anchor_subset / scale
-    anchor_subset[:2] = anchor_subset[:2] - 1 
+    anchor_subset[:2] = anchor_subset[:2] - 1
     anchor_subset[2:] = anchor_subset[2:] + 1
     return anchor_subset
-    
-
-    

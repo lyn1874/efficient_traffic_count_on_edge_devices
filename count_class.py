@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on 13.08.20 at 16:22
-
 @author: li
 """
 import torch
@@ -10,7 +9,6 @@ import cv2
 import numpy as np
 import time
 import os
-import sys
 from tqdm import tqdm
 import pickle
 import prediction as model_arch
@@ -26,12 +24,9 @@ input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536]
 
 class TrackCount(object):
     def __init__(self, model, compound_coef, threshold, nms_threshold, only_person, max_objects,
-                 iou_threshold_list, sim_threshold_list, counting, class_index, class_group,
-                 subtract_bg=False, student=False,
-                 params=None, resize=False, filter_small_box=True, 
-                 minus_bg_norm=False,
-                 x_y_threshold=[960, 0], bike_speed=6, 
-                 use_feature_maps=True, activate_kalman_filter=True):
+                 iou_threshold_list, class_index, class_group, subtract_bg=False, student=False,
+                 params=None, resize=False, filter_small_box=True, minus_bg_norm=False,
+                 x_y_threshold=[960, 0], bike_speed=6, activate_kalman_filter=True):
         """Initialize the tracking and counting parameters
         model: the efficientdet model that gives the bounding box regression and prediction
         compound_coef: int
@@ -51,15 +46,11 @@ class TrackCount(object):
         self.only_person = only_person
         self.max_num_objects = max_objects
         self.iou_threshold_list = iou_threshold_list
-        self.sim_threshold_list = sim_threshold_list
-        self.counting = counting
         self.subtract_bg = subtract_bg
         self.filter_small_box = filter_small_box
         self.student = student
         self.params = params
         self.resize = resize
-        self.line1_coord = [None for _ in class_index]
-        self.line2_coord = [None for _ in class_index]
         self.bikespeed = bike_speed
         self.x_y_threshold = x_y_threshold
         self.class_index = class_index
@@ -67,7 +58,6 @@ class TrackCount(object):
         num_class = np.arange(len(self.class_index))
         self.num_class = num_class
         self.minus_bg_norm = minus_bg_norm
-        self.use_feature_maps = use_feature_maps
         self.activate_kalman_filter = activate_kalman_filter
         self.parking_lot = []
         self.preprocess_mean = self.params['mean'][::-1]
@@ -81,13 +71,10 @@ class TrackCount(object):
         print("box prediction nms threshold", self.nms_threshold)
         print("the objects that need to be counted", self.only_person, self.class_index,
               self.class_group, self.num_class)
-        print("using the feature similarity during tracking", self.use_feature_maps)
         print("activating kalman filter to recover miss detect object", self.activate_kalman_filter)
         print("iou threshold to identify whether two people are same person", self.iou_threshold_list)
-        print("feature similarity threshold to identify whether two people are same person", self.sim_threshold_list)
         print("the input needs to be resized", self.resize)
         print("there should be maximum %d objects in the memory" % self.max_num_objects)
-        print("counting with only two boundaries", self.counting)
         print("subtracting the background from the input frame", self.subtract_bg)
         print("The mean and standard deviation for the input frame", self.preprocess_mean, self.preprocess_std)
         print("Normalizing the input frames after subtracting the background", self.minus_bg_norm)
@@ -95,7 +82,6 @@ class TrackCount(object):
 
         self.regressBoxes = eff_utils.BBoxTransform()
         self.clipBoxes = eff_utils.ClipBoxes()
-        self.num_box_per_level = tracking_utils.get_num_feature(input_sizes[self.compound_coef], 9)
 
         self.roi_group = [{} for _ in num_class]
         self.person_id_group = [{} for _ in num_class]
@@ -112,28 +98,28 @@ class TrackCount(object):
         # -------- old statistics------------------------------#
         self.old_rois = [[] for _ in num_class]
         self.count = np.zeros([len(num_class)])
-        
+
         self.old_feature_embedding = [[] for _ in num_class]
         self.old_anchor_index = [[] for _ in num_class]
         self.old_std_value = [[] for _ in num_class]
         self.old_percentage = [[] for _ in num_class]
         self.person_id_old = [[] for _ in num_class]
         self.old_trajectory_stat = [[] for _ in num_class]
-        
+
         self.pred_stat = []
 
         # ---------current statistics---------------------------#
         self.current_rois, self.current_orig_rois, self.current_featuremaps, self.current_anchor_index, \
-            self.current_std_value, self.current_class_ids, self.framed_metas, self.im, \
-            self.current_orig_featuremaps = [None for _ in range(9)]
+        self.current_std_value, self.current_class_ids, self.framed_metas, self.im, \
+        self.current_orig_featuremaps = [None for _ in range(9)]
         self.current_person_id = None
         self.new_object_index = None
-    
+
     def _load_precalculated_stat(self, camera):
         path = '/project/bo/AICity_Counting/HCMUS/track1-multi-intersection-counting/CenterNet/info_tracking/info_%s.mp4.npy' % camera
         _stat = np.load(path)
         self.pred_stat = _stat
-        
+
     def _give_prediction_baseon_precalculation(self, im_filename, roi_interest):
         imindex = int(im_filename.split('frame_')[1].split('.jpg')[0])
         _subindex = np.where(self.pred_stat[:, 1] == imindex)[0]
@@ -153,16 +139,15 @@ class TrackCount(object):
         else:
             rois = np.array([], dtype=np.float64)
             class_ids = np.array([], dtype=np.float64)
-        im = cv2.imread(im_filename)[:, :, ::-1]/255.0
+        im = cv2.imread(im_filename)[:, :, ::-1] / 255.0
         return rois, class_ids, im
-    
-    def omit_parked_cars(self, roi_group, index):        
+
+    def omit_parked_cars(self, roi_group, index):
         if len(self.parking_lot) > 0:
-#             if len(roi_group) == 1:
-#                 roi_group = np.expand_dims(roi_group, axis=0)
+            # if len(roi_group) == 1:
+            #     roi_group = np.expand_dims(roi_group, axis=0)
             overlaps = count_utils.compute_intersection_2(self.parking_lot, roi_group, bike=False)
             kept_index = np.where(overlaps > 100)[0]
-#             print(np.max(overlaps))
             return index[kept_index]
         else:
             return index
@@ -181,25 +166,12 @@ class TrackCount(object):
                                                         self.preprocess_mean, self.preprocess_std,
                                                         background, self.model, self.threshold, self.nms_threshold,
                                                         self.regressBoxes, self.clipBoxes, self.only_person,
-                                                        False, get_anchors=False, student=self.student,
-                                                        resize=self.resize, 
-                                                        filter_small_box=self.filter_small_box,
+                                                        student=self.student, filter_small_box=self.filter_small_box,
                                                         x_y_threshold=self.x_y_threshold,
-                                                        roi_interest=roi_interest, minus_bg_norm=self.minus_bg_norm,
-                                                        old_size=self.old_size)
-            [features, rois, orig_rois, _, index, framed_metas, class_ids], im = detector_output
-            anchor_index = np.array(tracking_utils.bucketize(torch.Tensor(index), self.num_box_per_level))
-            _feature_use = [v.detach().cpu().numpy() for v in features]
-
+                                                        roi_interest=roi_interest, minus_bg_norm=self.minus_bg_norm)
+            [_, rois, orig_rois, _, _, framed_metas, class_ids], im = detector_output
         std_value = tracking_utils.get_std_for_detection(im, rois)
-        if len(orig_rois) > 0 and self.use_feature_maps:
-            _aggregate_feature = tracking_utils.get_featuremap_wrt_rois(_feature_use, orig_rois,
-                                                                        input_sizes[self.compound_coef],
-                                                                        show_figure=False)
-        else:
-            _aggregate_feature = []
-        current_rois, current_orig_rois, \
-            current_feature_maps, current_anchor_index, current_std_value = [], [], [], [], []
+        current_rois, current_orig_rois, current_std_value = [], [], []
         for i in self.class_index:
             _index = np.where(class_ids == i)[0]
             if self.only_person == "ped_car":
@@ -210,21 +182,12 @@ class TrackCount(object):
             current_rois.append(rois[_index])
             current_orig_rois.append(orig_rois[_index])
             current_std_value.append(std_value[_index])
-            if self.use_feature_maps:
-                current_feature_maps.append([_aggregate_feature[j] for j in _index])
-                current_anchor_index.append(anchor_index[_index])
-            else:
-                current_feature_maps.append([[] for j in _index])
-                current_anchor_index.append([[] for j in _index])
+
         self.current_rois = current_rois
         self.current_orig_rois = current_orig_rois  # not needed
-        self.current_featuremaps = current_feature_maps  # not needed 
-        self.current_orig_featuremaps = _feature_use # not needed
-        self.current_anchor_index = current_anchor_index # not needed
-        self.current_std_value = current_std_value # yes
-        self.current_class_ids = class_ids # yes
-        self.framed_metas = framed_metas # yes, but framed metas is used to get the imh and imw, so I just need to replace this with imh, iw  
-        #imh, imw = framed_metas[0][3], framed_metas[0][2]
+        self.current_std_value = current_std_value  # yes
+        self.current_class_ids = class_ids  # yes
+        self.framed_metas = framed_metas
         self.im = im
 
     def give_initial_or_empty_stat(self, class_index, iterr, line_group):
@@ -247,20 +210,9 @@ class TrackCount(object):
             self.old_trajectory_stat[ci] = tracking_utils.get_kalman_init(self.current_rois[ci], 0)
         else:
             self.old_trajectory_stat[ci] = []
-        if self.use_feature_maps:
-            self.old_feature_embedding[ci] = self.current_featuremaps[ci].copy()
-            self.old_anchor_index[ci] = self.current_anchor_index[ci].copy()
-        else:
-            self.old_feature_embedding[ci] = []
-            self.old_anchor_index[ci] = []
-        if self.counting:
-            _, self.old_percentage[ci] = count_utils.assign_bbox_to_border(self.current_rois[ci].copy(),
-                                                                           self.line1_coord[ci], self.line2_coord[ci])
-            count_movement = np.zeros([5])
-        else:
-            _, self.old_percentage[ci] = count_utils.assign_bbox_to_border_single_line(self.current_rois[ci].copy(), 
-                                                                                       line_group, 0.2)
-            count_movement = np.zeros([len(line_group) * 2 + 1])
+        _, self.old_percentage[ci] = count_utils.assign_bbox_to_border_single_line(self.current_rois[ci].copy(),
+                                                                                   line_group, 0.2)
+        count_movement = np.zeros([len(line_group) * 2 + 1])
         if iterr == 0:
             self.count_movement_group = [np.zeros(len(count_movement)) for _ in self.class_group]
             self.count_move_pedestrain_group = np.zeros([len(count_movement)])
@@ -269,56 +221,41 @@ class TrackCount(object):
         ep = np.zeros([len(self.current_rois[ci])])
         return current_person_id, new_object_index, count_movement, direction_arrow, ep, []
 
-    def give_update_stat(self, class_index, counted_direction):
+    def give_update_stat(self, class_index):
         ci = class_index
-        update_state = tc.update_count_iou_featuresimilarity(self.im, self.old_rois[ci], self.old_trajectory_stat[ci],
-                                                             self.old_feature_embedding[ci], self.old_anchor_index[ci],
-                                                             self.old_std_value[ci], self.old_percentage[ci],
-                                                             self.percentage_difference_group[ci],
-                                                             self.current_rois[ci], self.current_orig_featuremaps,
-                                                             self.current_anchor_index[ci], self.current_std_value[ci],
-                                                             self.std_group[ci], self.current_featuremaps[ci],
-                                                             self.framed_metas, self.count[ci],
-                                                             self.iou_threshold_list[ci], self.sim_threshold_list[ci],
-                                                             self.person_id_old[ci], 0, input_sizes[self.compound_coef],
-                                                             self.line1_coord[ci], self.line2_coord[ci], "euc",
-                                                             self.counting, counted_direction,
-                                                             x_y_threshold=self.x_y_threshold, 
-                                                             use_feature_maps=self.use_feature_maps,
-                                                             activate_kalman_filter=self.activate_kalman_filter)
-        if self.counting:
-            self.old_rois[ci], self.old_trajectory_stat[ci], self.old_feature_embedding[ci], \
-                self.old_anchor_index[ci], self.old_std_value[ci], self.old_percentage[ci], \
-                self.current_rois[ci], current_person_id, new_object_index, self.person_id_old[ci], \
-                self.count[ci], ep, count_movement, direction_arrow, _removed_index = update_state
-        else:
-            self.old_rois[ci], self.old_trajectory_stat[ci], self.old_feature_embedding[ci], \
-                self.old_anchor_index[ci], self.old_std_value[ci], _, \
-                self.current_rois[ci], current_person_id, new_object_index, self.person_id_old[ci], \
-                self.count[ci], ep, count_movement, direction_arrow, _removed_index = update_state
+        update_state = tc.update_count_iou(self.im, self.old_rois[ci], self.old_trajectory_stat[ci],
+                                           self.old_std_value[ci],
+                                           self.current_rois[ci], self.current_std_value[ci],
+                                           self.std_group[ci],
+                                           self.framed_metas, self.count[ci],
+                                           self.iou_threshold_list[ci],
+                                           self.person_id_old[ci], [],
+                                           x_y_threshold=self.x_y_threshold,
+                                           activate_kalman_filter=self.activate_kalman_filter)
+        self.old_rois[ci], self.old_trajectory_stat[ci], self.old_std_value[ci], \
+            self.current_rois[ci], current_person_id, new_object_index, self.person_id_old[ci], \
+            self.count[ci], ep, _removed_index = update_state
+        return current_person_id, new_object_index, ep, _removed_index
 
-        return current_person_id, new_object_index, count_movement, direction_arrow, ep, _removed_index
-    
     def count_in_separate_window(self, counted_direction, line_group):
         direction_arrow_group, current_count_group = [], []
         for ci in self.num_class:
             direction_arrow, \
                 count_movement, \
-                percentage_new = count_utils.count_given_boundary(self.current_person_id[ci], 
+                percentage_new = count_utils.count_given_boundary(self.current_person_id[ci],
                                                                   self.new_object_index[ci], self.current_rois[ci],
-                                                                  self.person_id_old[ci], self.old_percentage[ci], 
+                                                                  self.person_id_old[ci], self.old_percentage[ci],
                                                                   self.old_rois[ci],
-                                                                  self.percentage_difference_group[ci], 
-                                                                  counted_direction,
-                                                                  line_group)
-#             print("updated old percentage", percentage_new)
+                                                                  self.percentage_difference_group[ci],
+                                                                  counted_direction, line_group)
             self.old_percentage[ci] = percentage_new
             self.count_movement_group[ci][:(2 * len(counted_direction) + 1)] += count_movement
             direction_arrow_group.append(direction_arrow)
             current_count_group.append(count_movement)
-        return direction_arrow_group, current_count_group            
-            
-    def save_stat_in_object(self, current_person_id_group, direction_arrow_group, new_object_index_group, kalman_prediction):
+        return direction_arrow_group, current_count_group
+
+    def save_stat_in_object(self, current_person_id_group, direction_arrow_group, new_object_index_group,
+                            kalman_prediction):
         for ci in self.num_class:
             current_person_id = current_person_id_group[ci]
             direction_arrow = direction_arrow_group[ci]
@@ -342,19 +279,22 @@ class TrackCount(object):
                     self.roi_std_group[ci]["%d" % _single_person_id] = tracking_utils.calc_roi_std(
                         self.roi_group[ci]["id%d" % _single_person_id])
                 if self.activate_kalman_filter:
-                    self.speed_group[ci]["id%d" % _single_person_id] = self.old_trajectory_stat[ci][np.where(self.person_id_old[ci] == _single_person_id)[0][0]].get_speed()
+                    self.speed_group[ci]["id%d" % _single_person_id] = self.old_trajectory_stat[ci][
+                        np.where(self.person_id_old[ci] == _single_person_id)[0][0]].get_speed()
                 else:
-                    
-                    self.speed_group[ci]["id%d" % _single_person_id] = tracking_utils.calc_speed_based_roi_loc(self.roi_group[ci]["id%d" % _single_person_id])
-#             print("already appeared person id", self.person_id_old[ci])
-#             print("current person id", current_person_id)
+                    self.speed_group[ci]["id%d" % _single_person_id] = tracking_utils.calc_speed_based_roi_loc(
+                        self.roi_group[ci]["id%d" % _single_person_id])
+            #             print("already appeared person id", self.person_id_old[ci])
+            #             print("current person id", current_person_id)
             for _single_numeric_index, _single_person_id in enumerate(self.person_id_old[ci]):
                 _index = np.where(current_person_id == _single_person_id)[0]
                 if _index in new_object_index:
                     self.person_id_group[ci]["id%d" % _single_person_id] = [1]
                     _old_percentage = np.expand_dims(self.old_percentage[ci][_single_numeric_index], axis=0)
-                    self.percentage_difference_group[ci]["id%d" % _single_person_id] = _old_percentage  # so this percentage difference group is not really percentage 
-                    #difference, it's actually the percentage group
+                    self.percentage_difference_group[ci][
+                        "id%d" % _single_person_id] = _old_percentage
+                    # so this percentage difference group is not really percentage
+                    # difference, it's actually the percentage group
                 else:
                     if len(_index) > 0:
                         _old_percentage_0 = self.percentage_difference_group[ci]["id%d" % _single_person_id]
@@ -394,48 +334,48 @@ class TrackCount(object):
     def _cancel_object(self, ci, _kept_id):
         update_state_after_remove = tracking_utils.cancel_object(self.old_rois[ci],
                                                                  self.old_trajectory_stat[ci],
-                                                                 self.old_feature_embedding[ci],
-                                                                 self.old_anchor_index[ci],
                                                                  self.old_std_value[ci], self.person_id_old[ci],
                                                                  self.old_percentage[ci], _kept_id,
-                                                                 counting=True, use_feature_maps=self.use_feature_maps,
+                                                                 counting=True,
                                                                  activate_kalman_filter=self.activate_kalman_filter)
         self.old_rois[ci], self.old_trajectory_stat[ci], self.old_feature_embedding[ci], \
             self.old_anchor_index[ci], self.old_std_value[ci], self.person_id_old[ci], \
             self.old_percentage[ci] = update_state_after_remove
-        
+
     def remove_disappeared_objects(self, kf_removed_index):
         _disappear_person_id_group = []
         for ci in self.num_class:
             _dis_single_class = []
             for _single_iterr, _single_id in enumerate(self.person_id_old[ci]):
-                if np.mean(self.person_id_group[ci]["id%d" % _single_id][-5:]) == 0:  # for the cityflow need to use std # for aicity no std
-                    if np.max(self.roi_std_group[ci]["id%d" % _single_id]) >=0: #20:  # for the cityflow 20, for ai-city 0
+                if np.mean(self.person_id_group[ci]["id%d" % _single_id][
+                           -5:]) == 0:  # for the cityflow need to use std # for aicity no std
+                    if np.max(self.roi_std_group[ci][
+                                  "id%d" % _single_id]) >= 0:  # 20:  # for the cityflow 20, for ai-city 0
                         _dis_single_class.append(_single_id)
-#                         print("removing %s" % self.class_group[ci], _single_id)
+                        # print("removing %s" % self.class_group[ci], _single_id)
             if len(kf_removed_index[ci]) > 0:
-#                 print("removing %s because of kalman filter" % self.class_group[ci], kf_removed_index[ci])
+                # print("removing %s because of kalman filter" % self.class_group[ci], kf_removed_index[ci])
                 _dis_single_class = np.concatenate([_dis_single_class, kf_removed_index[ci]], axis=0)
                 _dis_single_class = np.unique(_dis_single_class)
-#             if self.class_group[ci] == "car":
-#                 if len(self.parking_lot) > 0:
-#                     #-----------Here, calculate the overlapping with the parking lot-------------#
-#                     _roi = self.roi_group[ci]
-#                     _parked_car = []
-#                     for _id in _roi.keys():
-#                         if len(_roi[_id]) <= 1:
-#                             continue
-#                         overlaps = tracking_utils.compute_overlaps(self.parking_lot, _roi[_id])
-#                         if np.max(overlaps) > 0.62:
-#                             _parked_car.append(int(_id.split("id")[1]))
-#                             print("car %s is parked in the defined parking lot" % _parked_car)
-#                     if len(_parked_car) > 0:
-#                         _dis_single_class = np.unique(np.concatenate([_dis_single_class, _parked_car], axis=0))            
+                if self.class_group[ci] == "car":
+                    if len(self.parking_lot) > 0:
+                        #  -----------Here, calculate the overlapping with the parking lot-------------#
+                        _roi = self.roi_group[ci]
+                        _parked_car = []
+                        for _id in _roi.keys():
+                            if len(_roi[_id]) <= 1:
+                                continue
+                            overlaps = tracking_utils.compute_overlaps(self.parking_lot, _roi[_id])
+                            if np.max(overlaps) > 0.62:
+                                _parked_car.append(int(_id.split("id")[1]))
+                                print("car %s is parked in the defined parking lot" % _parked_car)
+                            if len(_parked_car) > 0:
+                                _dis_single_class = np.unique(np.concatenate([_dis_single_class, _parked_car], axis=0))
             if len(_dis_single_class) > 0:
                 _removed_person_id = _dis_single_class
                 _removed_person_id_index = [np.where(self.person_id_old[ci] == v)[0] for v in _removed_person_id]
                 _kept_id = np.delete(np.arange(len(self.person_id_old[ci])), np.array(_removed_person_id_index))
-#                 print("remove object", _kept_id)
+                # print("remove object", _kept_id)
                 self._cancel_object(ci, _kept_id)
                 for _single_remove in _removed_person_id:
                     self._remove_object_key(ci, "id%d" % _single_remove)
@@ -454,10 +394,10 @@ class TrackCount(object):
                         self.percentage_difference_group[ci][
                             _single_key] = self.percentage_difference_group[ci][_single_key][-100:]
 
-    def run(self, im_filenames, save_json_filename, save_video, save_video_filename, bc_stat, show, basenum, use_precalculated_detection=False, predefine_line=[]):
+    def run(self, im_filenames, save_json_filename, save_video, save_video_filename, show,
+            use_precalculated_detection=False, predefine_line=[]):
         camera_name = im_filenames[0].strip().split('/')[-3]
         date = im_filenames[0].strip().split('/')[-2]
-        self.old_size = np.shape(cv2.imread(im_filenames[0]))[:-1]
         if "aic2020" in im_filenames[0]:
             line_group, counted_direction = count_utils.give_aicity_linegroup(im_filenames[0])
             cam = im_filenames[0].strip().split('/')[-2]
@@ -475,10 +415,11 @@ class TrackCount(object):
         print("counting use multiple boundaries", line_group)
         if self.subtract_bg:
             if "aic2020" in im_filenames[0]:
+                path_middle = "bo/normal_data/aic2020/AIC20_track1/Dataset_A_Frame/annotations/bg_%s.npy" % cam
                 if 'tmp' in im_filenames[0]:
-                    bg = np.load('/tmp/bo/normal_data/aic2020/AIC20_track1/Dataset_A_Frame/annotations/bg_%s.npy' % cam)
+                    bg = np.load("/tmp/" + path_middle)
                 else:
-                    bg = np.load('/project_scratch/bo/normal_data/aic2020/AIC20_track1/Dataset_A_Frame/annotations/bg_%s.npy' % cam)
+                    bg = np.load("/project_scratch/" + path_middle)
             else:
                 bg = np.load('/home/jovyan/bo/dataset/%s/annotations/bg_%s.npy' % (camera_name, date))
         else:
@@ -505,12 +446,10 @@ class TrackCount(object):
         count_stat_for_saving = []
         if use_precalculated_detection:
             self._load_precalculated_stat(date)
-        
+
         iterr = 0
-#         try:
         while iterr < len(im_filenames) - 1:
             for iterr, single_imname in enumerate(tqdm(im_filenames)):
-#                 print("----------------step %d----------------------" % iterr)
                 now = time.ctime(os.path.getmtime(single_imname))
                 if iterr % save_box_stat == 0:
                     print("empty video statistics", iterr)
@@ -523,79 +462,73 @@ class TrackCount(object):
                     if iterr == 0 or len(self.old_rois[ci]) == 0:
                         _track_count_state = self.give_initial_or_empty_stat(ci, iterr, line_group)
                     else:
-                        _track_count_state = self.give_update_stat(ci, counted_direction)
+                        _track_count_state = self.give_update_stat(ci)
                     _current_person_id_g.append(_track_count_state[0])
                     _new_object_index_g.append(_track_count_state[1])
                     _ep.append(_track_count_state[-2])
                     _kf_remove_index.append(_track_count_state[-1])
-                    if self.counting is True or iterr == 0:
+                    if iterr == 0:
                         _current_count_group.append(_track_count_state[2])
                         self.count_movement_group[ci] += _track_count_state[2]
                         _direction_arrow_group.append(_track_count_state[3])
 
                 # current_person_id, new_object_index, count_movement, direction_arrow, ep, remove_index
                 self.current_person_id = _current_person_id_g
-                self.new_object_index = _new_object_index_g                
-                if not self.counting and iterr != 0:
-#                     print("old percentage shape", np.shape(self.old_percentage[0]), 
-#                           "old rois shape", np.shape(self.old_rois[0]),
-#                           "old person id", self.person_id_old)
-                    _direction_arrow_group, _current_count_group = self.count_in_separate_window(counted_direction, line_group)
-                self.save_stat_in_object(self.current_person_id, _direction_arrow_group, self.new_object_index, 
+                self.new_object_index = _new_object_index_g
+                if iterr != 0:
+                    _direction_arrow_group, _current_count_group = self.count_in_separate_window(counted_direction,
+                                                                                                 line_group)
+                self.save_stat_in_object(self.current_person_id, _direction_arrow_group, self.new_object_index,
                                          _ep)
                 _direction_arrow_group = self.let_arrow_keep_going(self.current_person_id, _direction_arrow_group)
                 for ci in self.num_class:
-                    self.direction_string_group[ci] = count_utils.assign_direction_num_to_string(self.direction_group[ci], 
-                                                                                             self.direction_string_group[ci],
-                                                                                                 self.counting, 
-                                                                                                 counted_direction)
-                
+                    self.direction_string_group[ci] = count_utils.assign_direction_num_to_string(
+                        self.direction_group[ci],
+                        self.direction_string_group[ci], counted_direction)
+
                 _statistics = {"frame": single_imname.strip().split('/')[-1],
                                "time": now}
                 _result_per_frame = {"frame": single_imname.strip().split('/')[-1],
                                      "time": now}
-                
+
                 for ci in self.num_class:
                     _cls_name = self.class_group[ci]
                     if _cls_name == "person" and np.sum(_current_count_group[ci]) != 0:
                         if type(self.bikespeed) is list or len(np.shape(self.bikespeed)) == 3:
                             _count_person, _count_bike, \
                                 self.bike_id_group, \
-                                self.pedestrian_id_group = count_utils.filter_out_bike_by_iou(self.direction_string_group[ci], 
-                                                                                              self.roi_group[ci], 
-                                                                                              _current_count_group[ci], 
-                                                                                              self.bike_id_group, 
-                                                                                              self.pedestrian_id_group,
-                                                                                              self.bikespeed)
+                                self.pedestrian_id_group = count_utils.filter_out_bike_by_iou(
+                                    self.direction_string_group[ci], self.roi_group[ci],
+                                    _current_count_group[ci], self.bike_id_group, self.pedestrian_id_group,
+                                    self.bikespeed)
                         else:
                             _count_person, _count_bike, \
                                 self.bike_id_group, \
-                                self.pedestrian_id_group = count_utils.filter_out_cyclist_from_person(self.direction_string_group[ci], 
-                                                                                                self.speed_group[ci], 
-                                                                                                _current_count_group[ci],
-                                                                                                self.bike_id_group,
-                                                                                                self.pedestrian_id_group,
-                                                                                                self.bikespeed)
+                                self.pedestrian_id_group = count_utils.filter_out_cyclist_from_person(
+                                    self.direction_string_group[ci], self.speed_group[ci], _current_count_group[ci],
+                                    self.bike_id_group, self.pedestrian_id_group, self.bikespeed)
                         self.count_move_pedestrain_group += _count_person
                         self.count_move_cyclists_group += _count_bike
                         _statistics.update({"count_move_pedestrian": _count_person.copy(),
                                             "count_move_bike": _count_bike.copy()})
-                        _result_per_frame.update({"count_move_pedestrian": _count_person.copy(),
-                                                  "count_move_bike": _count_bike.copy(),
-                                                  "aggregate_movement_pedestrian": self.count_move_pedestrain_group.copy(),
-                                                  "aggregate_movement_cyclists" : self.count_move_cyclists_group.copy()})
+                        _result_per_frame.update(
+                            {"count_move_pedestrian": _count_person.copy(),
+                             "count_move_bike": _count_bike.copy(),
+                             "aggregate_movement_pedestrian": self.count_move_pedestrain_group.copy(),
+                             "aggregate_movement_cyclists": self.count_move_cyclists_group.copy()})
                     elif _cls_name == "car" and np.sum(_current_count_group[ci]) != 0:
                         _keys = self.direction_string_group[ci].keys()
                         for _per_key in _keys:
                             self.car_id_group[_per_key] = self.direction_string_group[ci][_per_key]
-                        
+
                     _statistics.update({"rois_%s" % _cls_name: self.current_rois[ci],
                                         "current_person_id_%s" % _cls_name: self.current_person_id[ci],
                                         "current_new_index_%s" % _cls_name: self.new_object_index[ci],
                                         "count_%s" % _cls_name: self.count[ci],
                                         "count_move_%s" % _cls_name: _current_count_group[ci],
                                         "ep_%s" % _cls_name: _ep[ci],
-                                        "direction_arrow_%s" % _cls_name: _direction_arrow_group[ci]})  # this is correct!
+                                        "direction_arrow_%s" % _cls_name: _direction_arrow_group[
+                                            ci]})  # this is correct!
                     _result_per_frame.update({"current_person_id_%s" % _cls_name: self.current_person_id[ci],
                                               "current_new_index_%s" % _cls_name: self.new_object_index[ci],
                                               "count_%s" % _cls_name: self.count[ci],
@@ -604,19 +537,17 @@ class TrackCount(object):
                                               "direction_arrow_%s" % _cls_name: _direction_arrow_group[ci],
                                               "current_count_%s" % _cls_name: len(self.current_rois[ci]),
                                               "aggregate_count_%s" % _cls_name: self.count[ci].copy(),
-                                              "aggregate_movement_%s" % _cls_name: self.count_movement_group[ci].copy()})
+                                              "aggregate_movement_%s" % _cls_name: self.count_movement_group[
+                                                  ci].copy()})
                 video_stat.append(_statistics)
                 count_stat_for_saving.append(_result_per_frame)
                 self.remove_disappeared_objects(_kf_remove_index)
-                
-                if self.counting:
-                    _direc_count_stat = [[[self.line1_coord[ci], self.line2_coord[ci]],
-                                          self.count_movement_group[ci], _direction_arrow_group[ci]] for ci in self.num_class]
-                else:
-                    _direc_count_stat = [[line_group, self.count_movement_group[ci], _direction_arrow_group[ci]] for ci in self.num_class]
+
+                _direc_count_stat = [[line_group, self.count_movement_group[ci],
+                                      _direction_arrow_group[ci]] for ci in self.num_class]
                 if save_video_filename is not None or show is True:
                     _im_annotate = vt.put_multiple_stat_on_im(self.im, self.current_rois,
-                                                              self.current_person_id, self.new_object_index, 
+                                                              self.current_person_id, self.new_object_index,
                                                               self.count, _ep,
                                                               class_group=self.class_group,
                                                               show=show, show_direction_count=True,
@@ -628,8 +559,8 @@ class TrackCount(object):
                 if iterr % (save_box_stat - 1) == 0:
                     if iterr != 0 and stat_folder:
                         video_stat.append([self.pedestrian_id_group, self.bike_id_group, self.car_id_group])
-                        pickle.dump(video_stat, open(stat_folder + "/use_feature_similarity_%s_%s_%d" % (self.use_feature_maps, 
-                                                                                                         basenum, iterr), 'wb'))
+                        pickle.dump(video_stat,
+                                    open(stat_folder + "/%d" % iterr, 'wb'))
             if save_video:
                 video_writer.release()
             if save_json_filename:
@@ -642,50 +573,3 @@ class TrackCount(object):
 #                 video_writer.release()()
 #             if save_json_filename:
 #                 pickle.dump(count_stat_for_saving, open(save_json_filename, 'wb'))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
