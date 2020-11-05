@@ -10,10 +10,10 @@ Our counting framework follows detecting, tracking, and counting as shown in the
 
 ##### Detail
 
-- To show how our counting algorithm work, I used a surveillance video that is taken from YouTube (https://www.youtube.com/watch?v=MNn9qKG2UFI&t=6s) in the tutorial. The counting visualization is at: https://drive.google.com/file/d/1A6RzYPutqLcP8w5-IJFAhhzV4mUuzcpq/view?usp=sharing
+- The surveillance video that I used in the tutorial is taken from YouTube (https://www.youtube.com/watch?v=MNn9qKG2UFI&t=6s). The counting result is at: https://drive.google.com/file/d/1A6RzYPutqLcP8w5-IJFAhhzV4mUuzcpq/view?usp=sharing
 
 ##### TODO
-- [x] traffic counting tutorial on youtube video
+- [x] traffic counting tutorial 
 - [ ] update clean code
-- [ ] deploy it on edge device, report inference speed
+- [ ] deploy it on the edge device, report the inference speed
 
