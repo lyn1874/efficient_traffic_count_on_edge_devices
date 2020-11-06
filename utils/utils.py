@@ -31,6 +31,17 @@ def invert_affine(metas: Union[float, list, tuple], preds):
     return preds
 
 
+def invert_affine_npy(metas, preds):
+    for i in range(len(preds)):
+        if len(preds[i]) == 0:
+            continue
+        else:
+            new_w, new_h, old_w, old_h, padding_w, padding_h = metas[i]
+            preds[i][:, [0, 2]] = preds[i][:, [0, 2]] / (new_w / old_w)
+            preds[i][:, [1, 3]] = preds[i][:, [1, 3]] / (new_h / old_h)
+    return preds
+
+
 def aspectaware_resize_padding(image, width, height, interpolation=None, means=None):
     old_h, old_w, c = image.shape
     if old_w > old_h:
@@ -245,9 +256,65 @@ def preprocess(*image_path, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225
     return [v[:, :, ::-1] for v in ori_imgs], framed_imgs, framed_metas
 
 
+def nms_cpu(boxes, scores, overlap_threshold=0.5, min_mode=False):
+    boxes = boxes
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()[::-1]
+
+    keep = []
+    while order.size > 0:
+        keep.append(order[0])
+        xx1 = np.maximum(x1[order[0]], x1[order[1:]])
+        yy1 = np.maximum(y1[order[0]], y1[order[1:]])
+        xx2 = np.minimum(x2[order[0]], x2[order[1:]])
+        yy2 = np.minimum(y2[order[0]], y2[order[1:]])
+
+        w = np.maximum(0.0, xx2 - xx1 + 1)
+        h = np.maximum(0.0, yy2 - yy1 + 1)
+        inter = w * h
+
+        if min_mode:
+            ovr = inter / np.minimum(areas[order[0]], areas[order[1:]])
+        else:
+            ovr = inter / (areas[order[0]] + areas[order[1:]] - inter)
+
+        inds = np.where(ovr <= overlap_threshold)[0]
+        order = order[inds + 1]
+    return keep
+
+def postprocess_npy(transformed_anchors, regression, classification, threshold, iou_threshold):
+    scores = np.max(classification, axis=2, keepdims=True)
+    scores_over_thresh = (scores > threshold)[:,:,0]
+    out = []
+    for i in range(regression.shape[0]):  # batch_size
+        if scores_over_thresh[i].sum() == 0:
+            pass
+        else:
+            classification_per = np.transpose(classification[i, scores_over_thresh[i, :], ...], (1, 0))
+            transformed_anchors_per = transformed_anchors[i, scores_over_thresh[i, :], ...]
+            scores_per = scores[i, scores_over_thresh[i, :], ...]
+            anchors_nms_idx = nms_cpu(transformed_anchors_per, scores_per[:, 0],
+                                      overlap_threshold=iou_threshold)
+            
+            if len(anchors_nms_idx) != 0:
+                scores_ = np.max(classification_per[:, anchors_nms_idx], axis=0)
+                classes_ = np.argmax(classification_per[:, anchors_nms_idx], axis=0)
+                boxes_ = transformed_anchors_per[anchors_nms_idx, :]
+                _value = np.concatenate([boxes_, np.expand_dims(classes_, axis=-1), np.expand_dims(scores_, axis=-1)], axis=-1)
+                print(np.shape(_value))
+                out.append(_value)
+    return out
+
+
 def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold):
-    transformed_anchors = regressBoxes(anchors, regression)
-    transformed_anchors = clipBoxes(transformed_anchors, x)
+#     transformed_anchors = regressBoxes(anchors, regression)
+#     transformed_anchors = clipBoxes(transformed_anchors, x)
+    transformed_anchors = anchors
     scores = torch.max(classification, dim=2, keepdim=True)[0]
     scores_over_thresh = (scores > threshold)[:, :, 0]
     out = []
