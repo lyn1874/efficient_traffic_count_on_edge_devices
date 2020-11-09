@@ -9,6 +9,7 @@ from efficientdet.model import BiFPN, Regressor, Classifier, EfficientNet, Regre
 from efficientdet.model import RegressorMultiHeadsBoxLevel, ClassifierMultiHeadsBoxLevel
 import efficientdet.utils as eff_utils
 from efficientdet.utils import Anchors
+import utils.utils as input_utils
 
 
 class EfficientDetBackbone(nn.Module):
@@ -66,8 +67,9 @@ class EfficientDetBackbone(nn.Module):
                 m.eval()
 
     def forward(self, inputs):
+        inputs, img_shape = input_utils.preprocess_t3(inputs, self.input_sizes[self.compound_coef])
+        #[BATCH_SIZE, CHANNEL, IMH, IMW]
         max_size = inputs.shape[-1]
-
         _, p3, p4, p5 = self.backbone_net(inputs)
 
         features = (p3, p4, p5)

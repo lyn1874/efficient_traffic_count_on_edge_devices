@@ -120,8 +120,9 @@ def aspectaware_resize_padding_t2(image, width, height, old_h, old_w, mean=(0.40
     return image, new_w, new_h, old_w, old_h, padding_w, padding_h
 
 
-def aspectaware_resize_padding_t3(image, width, height, old_h, old_w, mean=(0.406, 0.456, 0.485),
+def aspectaware_resize_padding_t3(image, width, height, mean=(0.406, 0.456, 0.485),
                                   std=(0.225, 0.224, 0.229)):
+    old_h, old_w = np.shape(image)[:2]
     if old_w > old_h:
         new_w = width
         new_h = int(width / old_w * old_h)
@@ -131,11 +132,11 @@ def aspectaware_resize_padding_t3(image, width, height, old_h, old_w, mean=(0.40
     transform_list = [T.ToTensor(),
                       T.Normalize(mean, std)]
     image = T.Compose(transform_list)(image)
-    image = F.interpolate(image.unsqueeze(0), size=(new_h, new_w))
+    image = F.interpolate(image.unsqueeze(0), size=(new_h, new_w), mode='bilinear')
     padding_h = height - new_h
     padding_w = width - new_w
     image = F.pad(image, (0, padding_w, 0, padding_h), "constant", 0)
-    return image, new_w, new_h, padding_w, padding_h
+    return image.type(torch.FloatTensor), new_w, new_h, old_w, old_h, padding_w, padding_h
 
 
 def preprocess_batch_tensor(samples, max_size, background, roi_interest, mean, std, input_videos=False):
@@ -155,11 +156,23 @@ def preprocess_batch_t3(samples, max_size, background, roi_interest, old_h, old_
     """"""
     images = [cv2.imread(v)[:, :, ::-1] / 255.0 for v in samples]
     images = [(v - background) * roi_interest for v in images]
-    t0 = time.time()
     imgs_meta = [aspectaware_resize_padding_t3(image, max_size, max_size, old_h, old_w, mean, std) for image in images]
     framed_imgs = [img_meta[0] for img_meta in imgs_meta]
     framed_metas = [img_meta[1:] for img_meta in imgs_meta]
-    return images, framed_imgs, framed_metas, t0
+    return images, framed_imgs, framed_metas
+
+
+def preprocess_t3(image, max_size=512): #, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
+    """This mean and std are ordered in RGB
+    Note: The input has to be RGB!!
+    """
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    img_meta = aspectaware_resize_padding_t3(image, max_size, max_size, mean, std)
+    framed_imgs = img_meta[0]
+    framed_metas = img_meta[1:] 
+    return framed_imgs, framed_metas
+    
 
 
 def preprocess_batch_t2(samples, max_size, old_h, old_w, mean, std, input_videos=False):
@@ -228,6 +241,20 @@ def preprocess_batch(image_path, max_size=512, mean=(0.406, 0.456, 0.485), std=(
     framed_metas = [img_meta[1:] for img_meta in imgs_meta]
 
     return ori_imgs, framed_imgs, framed_metas
+
+
+def preprocess_integrate(image):
+    mean_ = [0.406, 0.456, 0.485]
+    std=[0.225, 0.224, 0.229]
+    float_imgs = [image/255]
+    normalised_imgs = [(img - mean_)/std_ for img in float_imgs]
+    imgs_meta = [aspectaware_resize_padding(img[..., ::-1], max_size, max_size,
+                                            means=None) for img in normalized_imgs]
+    framed_imgs = [img_meta[0] for img_meta in imgs_meta]
+    framed_metas = [img_meta[1:] for img_meta in imgs_meta]
+
+    return [v[:, :, ::-1] for v in ori_imgs], framed_imgs, framed_metas
+
 
 
 def preprocess(*image_path, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229), background=[0, 0, 0],
