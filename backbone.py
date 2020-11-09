@@ -81,6 +81,7 @@ class EfficientDetBackbone(nn.Module):
         transformed_anchors = self.clipboxes(transformed_anchors, inputs)
 
         return torch.cat((regression, classification, transformed_anchors), -1)
+#         return regression, classification, transformed_anchors
 #        return [regression, classification, transformed_anchors]
     
     def forward_test(self, inputs):

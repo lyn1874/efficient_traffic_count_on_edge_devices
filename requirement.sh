@@ -5,7 +5,7 @@ pip install numpy==1.17.1
 pip install motmetrics
 pip install filterpy
 pip install openpyxl
-# pip install --upgrade onnx-coreml
+pip install --upgrade onnx-coreml
 pip install --upgrade coremltools
 pip install onnxruntime
 pip install onnx

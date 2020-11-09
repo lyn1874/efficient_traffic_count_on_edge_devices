@@ -44,12 +44,25 @@ class ClipBoxes(nn.Module):
 
     def forward(self, boxes, img):
         batch_size, num_channels, height, width = img.shape
+        if height == 512:
+            max_value = 1024.0
+            min_value = -512.0
 
-        boxes[:, :, 0] = torch.clamp(boxes[:, :, 0], min=0)
-        boxes[:, :, 1] = torch.clamp(boxes[:, :, 1], min=0)
+        boxes[:, :, 0] = torch.clamp(boxes[:, :, 0], min=0.0, max=max_value)
+        boxes[:, :, 1] = torch.clamp(boxes[:, :, 1], min=0.0, max=max_value)
 
-        boxes[:, :, 2] = torch.clamp(boxes[:, :, 2], max=width - 1)
-        boxes[:, :, 3] = torch.clamp(boxes[:, :, 3], max=height - 1)
+        boxes[:, :, 2] = torch.clamp(boxes[:, :, 2], max=width - 1.0, min=min_value)
+        boxes[:, :, 3] = torch.clamp(boxes[:, :, 3], max=height - 1.0, min=min_value)
+#         print(boxes[:, :, 0].min(), boxes[:, :, 0].max())
+#         boxes[:, :, 0] = torch.clamp(boxes[:, :, 0], min=0, max=boxes[:,:,0].max())
+#         print(boxes[:, :, 0].min(), boxes[:, :, 0].max())
+
+#         print(boxes[:, :, 1].min(), boxes[:, :, 1].max())
+#         boxes[:, :, 1] = torch.clamp(boxes[:, :, 1], min=0, max=boxes[:,:,1].max())
+#         print(boxes[:, :, 1].min(), boxes[:, :, 1].max())
+
+#         boxes[:, :, 2] = torch.clamp(boxes[:, :, 2], max=width - 1, min=boxes[:,:,2].min())
+#         boxes[:, :, 3] = torch.clamp(boxes[:, :, 3], max=height - 1, min=boxes[:,:,3].min())
 
         return boxes
 
