@@ -8,6 +8,7 @@ from torch import nn
 from torchvision.ops import nms
 from typing import Union
 import uuid
+from PIL import Image
 import time
 import torchvision.transforms as T
 import torch.nn.functional as F
@@ -75,114 +76,63 @@ def aspectaware_resize_padding(image, width, height, interpolation=None, means=N
     return canvas, new_w, new_h, old_w, old_h, padding_w, padding_h,
 
 
-def aspectaware_resize_padding_tensor(image, width, height, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
-    old_h, old_w, c = image.shape
-    if old_w > old_h:
-        new_w = width
-        new_h = int(width / old_w * old_h)
-    else:
-        new_w = int(height / old_h * old_w)
-        new_h = height
-
-    padding_h = height - new_h
-    padding_w = width - new_w
-
-    image = cv2.resize(image, (new_w, new_h)).astype('float32')
-    #     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    transform_val_list = [
-        T.ToTensor(),
-        T.Normalize(mean, std)
-    ]
-    transform_compose = T.Compose(transform_val_list)
-    image = transform_compose(image)
-    image = F.pad(image, (0, padding_w, 0, padding_h), "constant", 0)
-    return image, new_w, new_h, old_w, old_h, padding_w, padding_h
-
-
-def aspectaware_resize_padding_t2(image, width, height, old_h, old_w, mean=(0.406, 0.456, 0.485),
-                                  std=(0.225, 0.224, 0.229)):
-    if old_w > old_h:
-        new_w = width
-        new_h = int(width / old_w * old_h)
-    else:
-        new_w = int(height / old_h * old_w)
-        new_h = height
-    transform_val_list = [T.Resize((new_h, new_w)),
-                          T.ToTensor(),
-                          T.Normalize(mean, std)]
-
-    padding_h = height - new_h
-    padding_w = width - new_w
-    transform_compose = T.Compose(transform_val_list)
-    image = transform_compose(image)
-    image = F.pad(image, (0, padding_w, 0, padding_h), "constant", 0)
-    return image, new_w, new_h, old_w, old_h, padding_w, padding_h
-
-
-def aspectaware_resize_padding_t3(image, width, height, mean=(0.406, 0.456, 0.485),
-                                  std=(0.225, 0.224, 0.229)):
+def aspectaware_resize_padding_t3(image, width, height, mean=(0.485, 0.456, 0.406),
+                                  std=(0.229, 0.224, 0.225)):
+    """Image preprocessing based on torch
+    Note: Input image has to be RGB instead of BGR!!
+    1. Transform it to a tensor
+    2. Normalize with the given mean and std
+    3. Resize it to a shape that its longest axis is as same as the required height/width
+    4. Pad the image with zeros on the residual part, because the final input to the network
+    should be a square
+    # for Jetson, it works like this
+    # but for app, I should only to the normalization part, because the resize part is done by applevision comp
+    """
     old_h, old_w = np.shape(image)[:2]
     if old_w > old_h:
         new_w = width
         new_h = int(width / old_w * old_h)
+        padding_w = 0
+        padding_h = height - new_h
+        pad_value = [0, 0, padding_w, padding_h]
     else:
         new_w = int(height / old_h * old_w)
         new_h = height
+        padding_w = width - new_w
+        padding_h = height - new_h
+        pad_value = [0, 0, padding_w, padding_h]
     transform_list = [T.ToTensor(),
-                      T.Normalize(mean, std)]
+                      T.Normalize(mean, std),
+                      T.Resize((new_h, new_w)),
+                      T.Pad(pad_value)] # the default resize behaviour is bilinear
     image = T.Compose(transform_list)(image)
-    image = F.interpolate(image.unsqueeze(0), size=(new_h, new_w), mode='bilinear')
-    padding_h = height - new_h
-    padding_w = width - new_w
-    image = F.pad(image, (0, padding_w, 0, padding_h), "constant", 0)
-    return image.type(torch.FloatTensor), new_w, new_h, old_w, old_h, padding_w, padding_h
+    image = image.unsqueeze(0)
+    return image, new_w, new_h, old_w, old_h, padding_w, padding_h
 
 
-def preprocess_batch_tensor(samples, max_size, background, roi_interest, mean, std, input_videos=False):
-    if input_videos:
-        images = [v for v in samples]
-    else:
-        images = [cv2.imread(img_path)[:, :, ::-1] / 255.0 for img_path in samples]
-    image_origin = images
-    images = [(v - background) * roi_interest for v in images]
-    imgs_meta = [aspectaware_resize_padding_tensor(image, max_size, max_size, mean, std) for image in images]
-    framed_imgs = [img_meta[0].unsqueeze(0) for img_meta in imgs_meta]
-    framed_metas = [img_meta[1:] for img_meta in imgs_meta]
-    return image_origin, framed_imgs, framed_metas
-
-
-def preprocess_batch_t3(samples, max_size, background, roi_interest, old_h, old_w, mean, std):
-    """"""
-    images = [cv2.imread(v)[:, :, ::-1] / 255.0 for v in samples]
-    images = [(v - background) * roi_interest for v in images]
-    imgs_meta = [aspectaware_resize_padding_t3(image, max_size, max_size, old_h, old_w, mean, std) for image in images]
-    framed_imgs = [img_meta[0] for img_meta in imgs_meta]
-    framed_metas = [img_meta[1:] for img_meta in imgs_meta]
-    return images, framed_imgs, framed_metas
-
-
-def preprocess_t3(image, max_size=512): #, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
-    """This mean and std are ordered in RGB
-    Note: The input has to be RGB!!
+def preprocess_ts(image, max_size=512, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
+                  only_detection=False):
+    """Preprocess an image
+    Args:
+        image: RGB, uint8, [0, 255]
+        max_size: the input size for the efficientdet
+        mean: RGB order
+        std: RGB order
+    Ops:
+        1. convert image to a tensor
+        2. Normalise -> resize along the longer axis -> padding    
+        3. unsqueeze along axis 0
     """
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
+    if type(image) == str:
+        image = Image.open(image)
+#         image = cv2.cvtColor(cv2.imread(image), cv2.COLOR_BGR2RGB)
+        
     img_meta = aspectaware_resize_padding_t3(image, max_size, max_size, mean, std)
     framed_imgs = img_meta[0]
     framed_metas = img_meta[1:] 
-    return framed_imgs, framed_metas
-    
-
-
-def preprocess_batch_t2(samples, max_size, old_h, old_w, mean, std, input_videos=False):
-    images = [Image.open(v).convert('RGB') for v in samples]
-    orig_img = [np.asarray(v) for v in images]
-    t0 = time.time()
-    imgs_meta = [aspectaware_resize_padding_t2(image, max_size, max_size, old_h, old_w, mean, std) for image in images]
-    framed_imgs = [img_meta[0].unsqueeze(0) for img_meta in imgs_meta]
-    framed_metas = [img_meta[1:] for img_meta in imgs_meta]
-    return images, framed_imgs, framed_metas, t0
+    if only_detection:
+        image = [0.0]
+    return np.asarray(image)/255.0, framed_imgs, framed_metas
 
 
 def increase_brightness(img, value=30):
@@ -224,36 +174,6 @@ def patch_preprocess(image_path, max_size=512, mean=(0.406, 0.456, 0.485),
     framed_metas = [img_meta[1:] for img_meta in imgs_meta]
 
     return ori_img, framed_imgs, framed_metas
-
-
-def preprocess_batch(image_path, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229),
-                     background=[0, 0, 0], roi_interest=[]):
-    float_imgs = [cv2.imread(v) / 255.0 for v in image_path]
-    ori_imgs = float_imgs
-    if np.sum(background) != 0:
-        float_imgs = [[(v - background[:, :, ::-1])] for v in float_imgs]
-    if np.sum(roi_interest) != 0:
-        float_imgs = [v * roi_interest for v in float_imgs]
-    normalized_imgs = [(img - mean) / std for img in float_imgs]
-    imgs_meta = [aspectaware_resize_padding(img[..., ::-1], max_size, max_size,
-                                            means=None) for img in normalized_imgs]
-    framed_imgs = [img_meta[0] for img_meta in imgs_meta]
-    framed_metas = [img_meta[1:] for img_meta in imgs_meta]
-
-    return ori_imgs, framed_imgs, framed_metas
-
-
-def preprocess_integrate(image):
-    mean_ = [0.406, 0.456, 0.485]
-    std=[0.225, 0.224, 0.229]
-    float_imgs = [image/255]
-    normalised_imgs = [(img - mean_)/std_ for img in float_imgs]
-    imgs_meta = [aspectaware_resize_padding(img[..., ::-1], max_size, max_size,
-                                            means=None) for img in normalized_imgs]
-    framed_imgs = [img_meta[0] for img_meta in imgs_meta]
-    framed_metas = [img_meta[1:] for img_meta in imgs_meta]
-
-    return [v[:, :, ::-1] for v in ori_imgs], framed_imgs, framed_metas
 
 
 
@@ -338,11 +258,8 @@ def postprocess_npy(transformed_anchors, regression, classification, threshold, 
     return out
 
 
-def postprocess(anchors, regression, classification, threshold, iou_threshold):
-#     transformed_anchors = regressBoxes(anchors, regression)
-#     transformed_anchors = clipBoxes(transformed_anchors, x)
-    transformed_anchors = anchors
-    scores = torch.max(classification, dim=2, keepdim=True)[0]
+def postprocess(transformed_anchors, regression, classification, threshold, iou_threshold):
+    scores = torch.max(classification, dim=2, keepdim=True)[0]  # return max value and the corresponding index
     scores_over_thresh = (scores > threshold)[:, :, 0]
     out = []
     for i in range(regression.shape[0]):
@@ -351,14 +268,13 @@ def postprocess(anchors, regression, classification, threshold, iou_threshold):
                 'rois': np.array(()),
                 'class_ids': np.array(()),
                 'scores': np.array(()),
-                'index': np.array(()),
-                'trans_anchor': transformed_anchors[i].detach().cpu().numpy(),
             })
         else:
             sub_index = np.where(scores_over_thresh[i, :].cpu().numpy())[0]
             classification_per = classification[i, scores_over_thresh[i, :], ...].permute(1, 0)
             transformed_anchors_per = transformed_anchors[i, scores_over_thresh[i, :], ...]
             scores_per = scores[i, scores_over_thresh[i, :], ...]
+            time_init = time.time()
             anchors_nms_idx = nms(transformed_anchors_per, scores_per[:, 0], iou_threshold=iou_threshold)
             if anchors_nms_idx.shape[0] != 0:
                 scores_, classes_ = classification_per[:, anchors_nms_idx].max(dim=0)
@@ -367,16 +283,12 @@ def postprocess(anchors, regression, classification, threshold, iou_threshold):
                     'rois': boxes_.cpu().numpy(),
                     'class_ids': classes_.cpu().numpy(),
                     'scores': scores_.cpu().numpy(),
-                    'index': sub_index[anchors_nms_idx.cpu().numpy()],
-                    'trans_anchor': transformed_anchors[i].detach().cpu().numpy(),
                 })
             else:
                 out.append({
                     'rois': np.array(()),
                     'class_ids': np.array(()),
                     'scores': np.array(()),
-                    'index': np.array(()),
-                    'trans_anchor': transformed_anchors[i].detach().cpu().numpy(),
                 })
 
     return out

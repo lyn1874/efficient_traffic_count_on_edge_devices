@@ -67,8 +67,6 @@ class EfficientDetBackbone(nn.Module):
                 m.eval()
 
     def forward(self, inputs):
-        inputs, img_shape = input_utils.preprocess_t3(inputs, self.input_sizes[self.compound_coef])
-        #[BATCH_SIZE, CHANNEL, IMH, IMW]
         max_size = inputs.shape[-1]
         _, p3, p4, p5 = self.backbone_net(inputs)
 
@@ -81,11 +79,10 @@ class EfficientDetBackbone(nn.Module):
         
         transformed_anchors = self.regressboxes(anchors, regression)
         transformed_anchors = self.clipboxes(transformed_anchors, inputs)
-
+        
         return torch.cat((regression, classification, transformed_anchors), -1)
 #         return regression, classification, transformed_anchors
-#        return [regression, classification, transformed_anchors]
-    
+
     def forward_test(self, inputs):
         max_size = inputs.shape[-1]
 
