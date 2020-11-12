@@ -6,7 +6,7 @@ from tqdm import tqdm
 import pickle
 import argparse
 import os
-import aicity_utils as aic_utils
+import utils.aicity_utils as aic_utils
 import prediction as model_arch
 import efficientdet.track_count as tc
 import efficientdet.utils as eff_utils
