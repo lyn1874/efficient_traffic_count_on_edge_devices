@@ -5,8 +5,19 @@ import cv2
 import matplotlib.pyplot as plt
 import csv
 import pickle
+import time
 from efficientdet.postprocess_count_utils import *
 import efficientdet.count_utils as count_utils
+
+    
+def ax_global_get(fig):
+    ax_global = fig.add_subplot(111, frameon=False)
+    ax_global.spines['top'].set_color('none')
+    ax_global.spines['bottom'].set_color('none')
+    ax_global.spines['left'].set_color('none')
+    ax_global.spines['right'].set_color('none')
+    ax_global.tick_params(labelcolor='w', top='off', bottom='off', left='off', right='off')
+    return ax_global
 
 
 def show_bbox(ori_img, roi, pred_score, gt_or_pred, show=False):
@@ -45,7 +56,7 @@ def get_video_writer(shape, out_path, name):
     if "aicity" in out_path:
         fps_use = 12.0
     elif "jovyan" in out_path:
-        fps_use = 12.0
+        fps_use = 24.0
     else:
         fps_use = 6.0
     shape_use = (shape[1], shape[0])
@@ -298,16 +309,16 @@ def put_accumulate_num_on_im(im, only_person, count_stat, movement_string):
     b_left = 135
     p_left = 5
     count_loc = [70 + 40 * i for i in range(len(movement_string))]
-    if only_person is "person":
+    if only_person == "person":
         c_group = ["person", "bike"]
         count_coord_p = [[p_left, v] for v in count_loc]
         count_coord_b = [[b_left, v] for v in count_loc]
         count_coord_g = [count_coord_p, count_coord_b]
-    elif only_person is "car":
+    elif only_person == "car":
         c_group = ["car"]
         count_coord_c = [[c_left, v] for v in count_loc]
         count_coord_g = [count_coord_c]
-    elif only_person is "ped_car":
+    elif only_person == "ped_car":
         count_coord_p = [[p_left, v] for v in count_loc]
         count_coord_b = [[b_left, v] for v in count_loc]
         count_coord_c = [[c_left, v] for v in count_loc]
@@ -335,8 +346,8 @@ def give_input_to_vispostim(filename, camera, seq, only_person, class_group, sho
                             movement_string=None, return_count=False,
                             return_stat=False, jupyter=True,
                             box_standard=[], specify_direc=[], return_id_remove=False, predefine_line=[],
-                            im_mom=None):
-    if algo is "boundary":
+                            im_mom=None, segment=[]):
+    if algo == "boundary":
         if "CAM" in camera:
             line_group, counted_direc = count_utils.give_line_group_antwerp(camera, only_person)
         elif camera == "aicity":
@@ -355,7 +366,7 @@ def give_input_to_vispostim(filename, camera, seq, only_person, class_group, sho
             movement_string = [["static"]]
             [movement_string.append(["move-%d-up" % i, "move-%d-down" % i]) for i in range(3)[1:]]
             movement_string = [v for j in movement_string for v in j]
-    if camera is "aicity":
+    if camera == "aicity":
         im_mom = "/project_scratch/bo/normal_data/aic2020/AIC20_track1/Dataset_A_Frame/%s/" % seq
     elif "CAM" in camera:
         im_mom = '/home/jovyan/bo/dataset/%s/%s/' % (camera, seq)
@@ -385,7 +396,10 @@ def give_input_to_vispostim(filename, camera, seq, only_person, class_group, sho
 
     count, time_use = give_count(stat, only_person, movement_string)
     if return_count:
-        return count, time_use, count_table_frameindex, id_remove
+        single_time = stat_original[0]['time']
+        q = single_time.split(' ')
+        read_date = '-'.join((q[1], q[2], q[-1]))
+        return count, time_use, count_table_frameindex, read_date
     if only_person is "person":
         count = count[:, :2]
     elif only_person is "car":
@@ -393,10 +407,20 @@ def give_input_to_vispostim(filename, camera, seq, only_person, class_group, sho
     num_im = len(stat) - 1
     shape = tuple(np.shape(cv2.imread(im_mom + stat_original[0]["frame"]))[:-1])
     _epnum = 1
+    if len(segment) > 0:
+        print(time.ctime(os.path.getmtime(im_mom + stat[segment[0]]['frame'])))
+        print(time.ctime(os.path.getmtime(im_mom + stat[segment[1]]['frame'])))
+    if len(segment) > 0:
+        interval = range(num_im)[segment[0]:segment[1]]
+        use_str = "%s_%s" % (time.ctime(os.path.getmtime(im_mom + stat[segment[0]]['frame'])), 
+                             time.ctime(os.path.getmtime(im_mom + stat[segment[1]]['frame'])))
+    else:
+        interval = range(num_im)
+        use_str = use_name    
     if save_video:
-        video_writer = get_video_writer(shape, filename + '%s.avi' % use_name, [])
+        video_writer = get_video_writer(shape, filename + '%s.avi' % use_str, [])
     print("There are %d images" % num_im)
-    for i in range(num_im):  # [12:13]:
+    for i in interval:  # [12:13]:
         _s = stat[i]
         im = cv2.imread(im_mom + _s["frame"])[:, :, ::-1] / 255.0
         for _citer, _cls in enumerate(class_group):
@@ -422,31 +446,330 @@ def give_input_to_vispostim(filename, camera, seq, only_person, class_group, sho
 
     if save_video:
         video_writer.release()    
+        
 
 
-def run0():
-    img_path="frames/clip/frame_00000020.jpg"
-    time_g = 0.0
-    for i in range(20):
-        time_i = time.time()
-        ori_imgs, framed_imgs, \
-            framed_metas = input_utils.preprocess(img_path, max_size=512)
-        x = torch.from_numpy(framed_imgs[0]).unsqueeze(0).permute(0, 3, 1, 2)
-        if i > 4:
-            time_g += (time.time() - time_i)
-    print("Original Preprocess speed..................")
-    print("FPS %.2f" % ((20 - 5)/time_g))
+def sorted_stat(path, camera, date, only_person, class_group, box_standard, specify_direc, filter_id):    
+    count_num, time_use, _, read_date = give_input_to_vispostim(path, camera, date, only_person, 
+                                                     class_group, False, False, "ok", "boundary", return_count=True,
+                                                     box_standard=box_standard, 
+                                                     specify_direc=specify_direc, return_id_remove=filter_id)
+    aggre_count = {}
+    aggre_count["time"] = np.array(time_use)
+    aggre_count["pedestrian"] = count_num[:, 0, :]
+    aggre_count["cyclist"] = count_num[:, 1, :]
+    aggre_count["car"] = count_num[:, 2, :]
+    return aggre_count, read_date
+
+
+
+def get_count_every_k_min(k, stat, class_group, input_date):
+    """This function is used to get the count every k minutes
+    stat: a dict, with key 'frameid', 'current count', 'aggregate count', 'current direction count', 
+        'aggregated direction count', 'current_time'
+    k: int, defines the minute we want
+    """
+    time_int = []
+    date_group = []
+    second = np.array([v.split(':')[-1] for v in stat['time']])
+    index = np.where(second.astype('int32') <= 2)[0][0]
+    for single_key in stat.keys():
+        stat[single_key] = stat[single_key][index:]
+    time_per_frame = stat['time']
+    hour = np.array([v.split(':')[0] for v in stat['time']])
+    transfer = "00" in hour and "23" in hour
+    for iterr, single_time in enumerate(time_per_frame):
+        if ' ' in single_time:
+            single_time = single_time.strip().split(' ')[3]
+            time_per_frame[iterr] = single_time
+            q = single_time.split(' ')
+            date = '-'.join((q[1], q[2], q[-1]))
+        else:
+            if transfer == False:
+                date = input_date
+            else:
+                if "23" in single_time.split(":")[:1]:
+                    date = input_date
+                elif "00" in single_time.split(":")[:1]:
+                    date = '-'.join((input_date.split('-')[0], str(int(input_date.split('-')[1]) + 1),
+                                     input_date.split('-')[-1]))
+        time_int.append([int(v) for v in single_time.strip().split(':')])
+        date_group.append(date)
+    time_int = np.array(time_int)
+    date_group = np.array(date_group)
+    if transfer == False:
+        time_single = [v[0] * 60 + v[1] + v[2]/60 for v in time_int]
+    else:
+        time_single = [v[0] * 60 + v[1] + v[2]/60 if v[0] == 23 else (v[0] + 24) * 60 + v[1] + v[2]/60 for v in time_int]
+    diff = np.diff(time_single, axis=0)
+    _cum = np.cumsum(diff, axis=0)
+    count_sort = {}
+    count_sort["time"] = [time_per_frame[0]]
+    count_sort["date"] = [date_group[0]]
+    for iterr, single_class in enumerate(class_group):
+        count_sort["count_%s" % single_class] = [stat[single_class][0, 1:3]]  # static, move-1-up, move-1-down
+    for i in range(int(_cum[-1]/k)+1)[1:]:
+#     for i in range(int(np.ceil(_cum[-1]/k))+1)[1:]:
+        _iterr = np.where(_cum == i * k)[0][0]
+        count_sort["time"].append(time_per_frame[_iterr])
+        count_sort["date"].append(date_group[_iterr])
+        for iterr, single_class in enumerate(class_group):
+            count_sort["count_%s" % single_class].append(stat[single_class][_iterr, 1:3])
+    if np.max(_cum) - (i * k) > 0.95:
+        count_sort["time"].append(time_per_frame[-1])
+        count_sort["date"].append(date_group[-1])
+        for iterr, single_class in enumerate(class_group):
+            count_sort["count_%s" % single_class].append(stat[single_class][-1, 1:3])
+        
+        
+    for single_class in class_group:
+        count_sort["count_%s" % single_class] = np.vstack(count_sort["count_%s" % single_class])
+        count_sort["count_%s" % single_class] = np.vstack([
+            [count_sort["count_%s" % single_class][0]], np.diff(count_sort["count_%s" % single_class], axis=0)])
+    return count_sort
+
+
+def arrange_time(_time):
+    sp = _time.split(':')
+    sp[0] = '%02d' % (int(sp[0]) + 2)
+    _time = ':'.join(sp)
+    return _time
+
+
+def fix_error(count_table_stat, class_group):
+    for s in class_group:
+        value = count_table_stat[s]
+        diff = np.diff(value, axis=0)
+        if len(np.where(diff[:, 1] < 0)[0]) > 0 or len(np.where(diff[:, 2] < 0)[0])>0:
+#             print("fix error for class %s" % s)
+            stat = value.copy()
+            for j in [1, 2]:
+                for iterr, _va in enumerate(stat[:-1, j]):
+                    if stat[iterr + 1, j] < _va:
+                        stat[iterr+1, j] = _va
+            count_table_stat[s] = stat
+    return count_table_stat
+
+
+def write_csv_file(json_filename, only_person, k, datetime_or_ostime, 
+                   class_group, algo, num_movement, box_standard, 
+                   specify_direc, count_path, remove_id=False, save=False, return_stat=False):
+    only_person="ped_car"
+    camera = json_filename.split('/')[-4]
+    date = json_filename.split('/')[-3]
+    csv_filename = count_path + "/%s.csv" % json_filename.split('/')[-2]
+#     csv_filename = "/".join(json_filename.split('/')[:-2]) + "/count_statistics/%s.csv" % json_filename.split('/')[-2]
+    if only_person == "ped_car":
+        stat_class_group = ["person", "car"]
+    elif only_person == "car":
+        stat_class_group = ["car"]
+    elif only_person == "ped":
+        stat_class_group = ["person"]    
+    stat, input_date = sorted_stat(json_filename, camera, date, only_person, stat_class_group,
+                       box_standard, specify_direc, remove_id)
+    stat = fix_error(stat, class_group)
+    print(stat["time"][-1])
+    stat = get_count_every_k_min(k, stat, class_group, input_date)
+    if return_stat == True:
+        return stat
+    row_name = ["Date", "start", "end"]
+    for single_class in class_group:
+        row_name = np.hstack([row_name, [single_class for _ in range(num_movement)]])
+    row_name2 = [["up", "down", "count"] for _ in range(len(class_group))]
+    row_name2 = np.hstack([" ", " ", " ", [v for j in row_name2 for v in j]])
+    _content = []
+    for i in range(len(stat["time"]) - 1):
+        _time_init = stat["time"][i]
+        _time_end = stat["time"][i+1]
+        _single_stat = [stat["date"][i], _time_init, _time_end]
+        for single_class in class_group:
+            _value = stat["count_%s" % single_class][i+1]
+            _single_stat = np.hstack([_single_stat, _value, np.sum(_value)])
+        _content.append(_single_stat)
+    if save:
+        with open(csv_filename, 'w', newline='') as file:
+            writer = csv.writer(file)    
+            writer.writerow(row_name)
+            writer.writerow(row_name2)
+            for i in range(len(stat["time"]) - 1):
+                writer.writerow(_content[i])
+    else:
+        print(np.shape(row_name), np.shape(row_name2), np.shape(_content))
+        return np.vstack([np.expand_dims(row_name, 0), np.expand_dims(row_name2, 0), _content])
     
 
-def run1():
-    impath = "frames/clip/frame_00000020.jpg"
-    time_g = 0.0
-    for i in range(20):
-        time_i = time.time()
-        _, x, framed_metas = input_utils.preprocess_t3(impath) #, mean=[0.0, 0.0, 0.0], std=[1.0, 1.0, 1.0])
-        if i > 4:
-            time_g += (time.time() - time_i)
-    print("Updated Preprocess speed..................")
-    print("FPS %.2f" % ((20 - 5)/time_g))
+def load_csv(filename, load_name=False):
+    value = []
+    with open(filename) as csv_file:
+        csv_reader = csv.reader(csv_file, delimiter=',')        
+        for line_count, row in enumerate(csv_reader):
+            if line_count == 0:
+                name = row       
+                if load_name:
+                    return name
+            else:
+                value.append(row)
+                line_count += 1
+#         print(f'Processed {line_count} lines.')
+    return np.array(value), np.array(name)
+
+
+def save_csv(csv_filename, row_name, value):
+    with open(csv_filename, 'w', newline='') as file:
+        writer = csv.writer(file)    
+        writer.writerow(row_name)
+        for i in range(len(value)):
+            writer.writerow(value[i])
+        
+    
+def get_aggregate(csv_folder, savepath, savename, return_stat=False):
+    file = []
+    for s_fold in csv_folder:
+        _file = [s_fold + v for v in sorted(os.listdir(s_fold)) if '.csv' in v]
+        file.append(_file)
+    file = [v for j in file for v in j]
+#     file = [csv_folder + v for v in sorted(os.listdir(csv_folder)) if '.csv' in v]
+    value_group = []
+    for i, single_file in enumerate(file):
+        value, name = load_csv(single_file)
+        if i != 0:
+            value = value[1:]
+        value_group.append(value)
+    value_group = np.array([v for j in value_group for v in j])
+    date = value_group[1:, 0]
+    date_num = np.zeros([len(value_group), 1])
+    for q_iter, q in enumerate(np.unique(date)):
+        date_num[np.where(value_group[:, 0] == q)[0], :] = q_iter
+    value_group = np.concatenate([date_num, value_group], axis=-1)
+    name = np.concatenate([["index"], name], axis=0)
+    csv_new = savepath + "/%s.csv" % savename
+    save_csv(csv_new, name, value_group)
+    if return_stat:
+        return name, value_group
+    
+
+def arrange_gt(camera, readdate, savedate, load_hour):
+    path = "/home/jovyan/bo/dataset/%s/%s.csv" % (camera, readdate)
+    value, name = load_csv(path)
+    value = np.array(value)
+    index = np.arange(len(value))
+    index = np.reshape(index, [-1, 4])
+
+    time_suppose = ['%02d:00:00' % i for i in range(24)]
+    time_suppose.append("00:00:00")
+    time_init = value[index[:,0], 2]
+    date_read = [v.strip().split(' ')[0:1] for v in time_init]
+    time_init = [v.strip().split(' ')[-1].split('+')[:1] for v in time_init]
+    count = value[:, 3]
+    count_per_class = np.reshape(count, [-1, 4]).astype('float32') # cyclist, pedestrian, car, truck
+    obj = {}
+    row_name = ["Date", "Start Time", "End Time", "Cyclist", "Pedestrian", "Car", "Truck"]
+    if load_hour is True:
+        num_hour = len(date_read) // 12
+        value = []
+        for i in range(num_hour-1):
+            init_time = time_init[i * 12]
+            end_time = time_init[(i+1) * 12]
+            _date = date_read[(i+1) * 12 - 1]
+            _c = np.sum(count_per_class[i*12:(i+1)*12, :], axis=0)
+            value.append(np.hstack([_date, init_time, end_time, _c]))
+    else:
+        value = np.hstack([date_read, time_init, time_init, count_per_class])
+
+    obj["stat"]=[]
+    value = np.array(value)
+    for j, every_time in enumerate(time_suppose[:-1]):
+        if every_time in value[:, 1]:
+            l = np.where(value[:, 1] == every_time)[0][0]
+            obj["stat"].append(value[l])
+        else:
+            obj["stat"].append([date_read[0][0], every_time, time_suppose[j+1], 0, 0, 0, 0])
+
+    obj["stat"] = np.array(obj["stat"])
+    save_object = {}
+    save_object["date"] = obj["stat"][0, 0]
+    save_object["time"] = obj["stat"][:, 1]
+    save_object["Cyclist"] = obj["stat"][:, 3].astype('float32')
+    save_object["Pedestrian"] = obj["stat"][:, 4].astype('float32')
+    save_object["Car"] = obj["stat"][:, 5].astype('float32')
+
+    csv_name = path.split('/2020')[0] + "/%s.csv" % savedate 
+    save_csv(csv_name, row_name, value)
+    pickle.dump(save_object, open(csv_name.split(".csv")[0] + ".obj", 'wb'))
     
     
+def arrange_pred(camera, k):
+    csv_folder = "Results/CountStatistics/%s/" % camera
+    csv_folder = [csv_folder + v + "/" for v in sorted(os.listdir(csv_folder)) if '_' in v]
+    savedir = "/home/jovyan/bo/dataset/%s/" % camera
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    name, value_g = get_aggregate(csv_folder, savedir, "pred_count", True)
+    minu = np.array([v.strip().split(":")[1] for v in value_g[1:, 2]])
+    index = np.where(minu == "00")[0][0]
+    value_g = value_g[index+1:, :]
+    time_init = [v.split(":") for v in value_g[:, 2]]
+    index_ = (value_g[:, 0]).astype('float32')
+    time_num = np.zeros([len(index_)])
+    for i, s_t in enumerate(time_init):
+        _va = (float(s_t[0]) + (index_[i] * 24)) * 60 + float(s_t[1]) + float(s_t[2])/60
+        time_num[i] = _va
+    time_diff = np.diff(time_num, axis=0)
+    _cum = np.cumsum(time_diff, axis=0)
+    accu_count = np.cumsum(value_g[:, 4:].astype('float32'), axis=0)
+    count_sort = {}
+    count_sort["time"] = [value_g[0, 2]]
+    count_sort["date"] = [value_g[0, 1]]
+    count_sort["count"] = [value_g[0, 4:]]
+    k = 60
+    for i in range(int(_cum[-1]/k)+1)[1:]:
+        _iterr = np.where(_cum == i * k)[0]
+        if len(_iterr) > 0:
+            _iterr = _iterr[0]
+        else:
+            _iterr = np.argsort(abs(_cum - i * k))[1]
+        count_sort["time"].append(value_g[_iterr, 2])
+        count_sort["date"].append(value_g[_iterr, 1])
+        count_sort["count"].append(accu_count[_iterr])
+
+    count_sort["count"] = np.array(count_sort["count"])
+    count_sort["count"][1:] = np.diff(count_sort["count"].astype('float32'), axis=0)
+    save_stat = []
+    for i in range(len(count_sort["time"]) - 1):
+        init_time = count_sort["time"][i]
+        end_time = count_sort["time"][i+1]
+        _count = count_sort["count"][i+1]
+        _date = count_sort["date"][i+1]
+        save_stat.append(np.hstack([_date, init_time, end_time, _count]))
+    
+    num_lost = int(count_sort["time"][1].split(":")[0])
+    time_lost = ["%02d:00:00" % i for i in range(num_lost)]
+    save_object = {}
+    
+    save_object["date"] = np.hstack([[count_sort["date"][0] for _ in range(num_lost)], count_sort["date"][1:]])
+    save_object["time"] = np.hstack([time_lost, count_sort["time"][:-1]])
+    save_object["Cyclist"] = np.hstack([[0 for _ in range(num_lost)], count_sort["count"][1:, 5]]).astype('float32')
+    save_object["Pedestrian"] = np.hstack([[0 for _ in range(num_lost)], count_sort["count"][1:, 2]]).astype('float32')
+    save_object["Car"] = np.hstack([[0 for _ in range(num_lost)], count_sort["count"][1:, -1]]).astype('float32')
+    pickle.dump(save_object, open(savedir + "pred_count.obj", 'wb'))
+    namecsv = np.hstack([["Date", "Start Time", "End Time"],name[-9:]])
+    save_csv(savedir + "pred_count.csv", namecsv, save_stat)
+    
+
+def write_detection_accuracy_csv(accuracy, csv_file):
+    a = np.expand_dims(accuracy["ckpt_step"], axis=1)
+    b = np.array(accuracy["AP"])
+    c = np.array(accuracy["AR"])
+    d = np.hstack([a, b, c])
+    row_name = ["ckpt_step", "AP 0.5:0.95", "AP 0.5", "AP 0.75", "AP 0.5:0.95 S", "AP 0.5:0.95 M", "AP 0.5:0.95 L",
+                "AR 0.5:0.95", "AR 0.5", "AR 0.75", "AR 0.5:0.95 S", "AR 0.5:0.95 M", "AR 0.5:0.95 L"]
+    with open(csv_file, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(row_name)
+        for i in range(len(d)):
+            writer.writerow(d[i])
+    
+
+
+    
+        

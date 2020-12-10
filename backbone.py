@@ -4,9 +4,10 @@ import math
 
 import torch
 from torch import nn
+import time
 
-from efficientdet.model import BiFPN, Regressor, Classifier, EfficientNet, RegressorMultiHeads, ClassifierMultiHeads
-from efficientdet.model import RegressorMultiHeadsBoxLevel, ClassifierMultiHeadsBoxLevel
+from efficientdet.model_torch import BiFPN, Regressor, Classifier, EfficientNet, RegressorMultiHeads, ClassifierMultiHeads
+from efficientdet.model_torch import RegressorMultiHeadsBoxLevel, ClassifierMultiHeadsBoxLevel
 import efficientdet.utils as eff_utils
 from efficientdet.utils import Anchors
 import utils.utils as input_utils
@@ -77,26 +78,28 @@ class EfficientDetBackbone(nn.Module):
         classification = self.classifier(features)
         anchors = self.anchors(inputs, inputs.dtype)
         
-        transformed_anchors = self.regressboxes(anchors, regression)
-        transformed_anchors = self.clipboxes(transformed_anchors, inputs)
+#         transformed_anchors = self.regressboxes(anchors, regression)
+#         transformed_anchors = self.clipboxes(transformed_anchors, inputs)
         
 #         return torch.cat((regression, classification, transformed_anchors), -1)
-        return regression, classification, transformed_anchors
+        return regression, classification, anchors
 
     def forward_test(self, inputs):
         max_size = inputs.shape[-1]
-
         _, p3, p4, p5 = self.backbone_net(inputs)
 
         features = (p3, p4, p5)
         features = self.bifpn(features)
 
         regression = self.regressor(features)
-        classification, cla_features = self.classifier.forward_test(features)
+        classification = self.classifier(features)
         anchors = self.anchors(inputs, inputs.dtype)
-
-        return [features, cla_features], regression, classification, anchors
         
+        transformed_anchors = self.regressboxes(anchors, regression)
+        transformed_anchors = self.clipboxes(transformed_anchors, inputs)
+        
+#         return torch.cat((regression, classification, transformed_anchors), -1)
+        return regression, classification, transformed_anchors
     
 
     def init_backbone(self, path):

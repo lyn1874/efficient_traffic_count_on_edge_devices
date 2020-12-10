@@ -3,6 +3,7 @@
 # pip install tensorboardX
 # pip install numpy==1.17.1
 # pip install motmetrics
+pip install torch==1.7.0
 pip install filterpy
 pip install openpyxl
 pip install --upgrade coremltools

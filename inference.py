@@ -123,18 +123,20 @@ def run(opt):
         preds = {}
         num_frame = len(frames)
         fps_detection = 0.0
+        old_image_shape = np.shape(cv2.imread(frames[0]))[:2]
         for i in tqdm(range(num_frame // opt_batch_size)):
             _imsubset = frames[i * opt_batch_size:(i+1)*opt_batch_size]
             time_init = time.time()
             _pred_oois, \
-                framed_metas = model_arch.get_prediction_batch(_imsubset, input_sizes[opt.compound_coef],
+                framed_metas, _ = model_arch.get_prediction_batch(_imsubset, input_sizes[opt.compound_coef],
                                                                   mean, std, None, model, threshold,
                                                                   nms_threshold, regressboxes, clipboxes,
                                                                   count_class, student=student,
                                                                   filter_small_box=opt.filter_small_box,
                                                                   x_y_threshold=opt.x_y_threshold,
                                                                   roi_interest=opt.roi_interest,
-                                                                  only_detection=True)
+                                                                  only_detection=True,
+                                                                  old_image_shape=old_image_shape)
             fps_detection += (time.time() - time_init)
             for j, _s_file in enumerate(_imsubset):
                 preds["%s" % _s_file.split("/")[-1]] = [_pred_oois[j][0], _pred_oois[j][1], 

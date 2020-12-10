@@ -348,20 +348,20 @@ class TrackCount(object):
                 # print("removing %s because of kalman filter" % self.class_group[ci], kf_removed_index[ci])
                 _dis_single_class = np.concatenate([_dis_single_class, kf_removed_index[ci]], axis=0)
                 _dis_single_class = np.unique(_dis_single_class)
-                if self.class_group[ci] == "car":
-                    if len(self.parking_lot) > 0:
-                        #  -----------Here, calculate the overlapping with the parking lot-------------#
-                        _roi = self.roi_group[ci]
-                        _parked_car = []
-                        for _id in _roi.keys():
-                            if len(_roi[_id]) <= 1:
-                                continue
-                            overlaps = tracking_utils.compute_overlaps(self.parking_lot, _roi[_id])
-                            if np.max(overlaps) > 0.62:
-                                _parked_car.append(int(_id.split("id")[1]))
-                                print("car %s is parked in the defined parking lot" % _parked_car)
-                            if len(_parked_car) > 0:
-                                _dis_single_class = np.unique(np.concatenate([_dis_single_class, _parked_car], axis=0))
+#                 if self.class_group[ci] == "car":
+#                     if len(self.parking_lot) > 0:
+#                         #  -----------Here, calculate the overlapping with the parking lot-------------#
+#                         _roi = self.roi_group[ci]
+#                         _parked_car = []
+#                         for _id in _roi.keys():
+#                             if len(_roi[_id]) <= 1:
+#                                 continue
+#                             overlaps = tracking_utils.compute_overlaps(self.parking_lot, _roi[_id])
+#                             if np.max(overlaps) > 0.62:
+#                                 _parked_car.append(int(_id.split("id")[1]))
+#                                 print("car %s is parked in the defined parking lot" % _parked_car)
+#                             if len(_parked_car) > 0:
+#                                 _dis_single_class = np.unique(np.concatenate([_dis_single_class, _parked_car], axis=0))
             if len(_dis_single_class) > 0:
                 _removed_person_id = _dis_single_class
                 _removed_person_id_index = [np.where(self.person_id_old[ci] == v)[0] for v in _removed_person_id]
@@ -395,10 +395,13 @@ class TrackCount(object):
             roi_interest = np.load(im_filenames[0].split("Dataset_A_Frame")[0] + "ROIs/%s.npy" % cam)
             print("The roi interest region", np.shape(roi_interest))
         elif "/jovyan/" in im_filenames[0]:
+            camera_name = im_filenames[0].strip().split('/')[5]
+            date = im_filenames[0].strip().split('/')[6]
             line_group, counted_direction = count_utils.give_line_group_antwerp(im_filenames[0], self.ooi)
             roi_interest = np.load('/home/jovyan/bo/dataset/%s/annotations/rois.npy' % camera_name)
             self.parking_lot = np.load('/home/jovyan/bo/dataset/%s/annotations/parking_lot.npy' % camera_name)
             print("....I am doing experiment on camera %s and date %s" % (camera_name, date))
+            print("The shape of the parking lot", np.shape(self.parking_lot), np.max(self.parking_lot), np.min(self.parking_lot), np.sum(self.parking_lot))
         else:
             line_group = predefine_line
             counted_direction = np.arange(len(line_group))
@@ -428,11 +431,12 @@ class TrackCount(object):
                     os.makedirs(stat_folder)
             else:
                 stat_folder = None
-        save_box_stat = [v for v in range(len(im_filenames) + 1)[500:3000] if len(im_filenames) % v == 0]
-        if len(save_box_stat) == 0:
-            save_box_stat = len(im_filenames)
-        else:
-            save_box_stat = int(save_box_stat[-1])
+#         save_box_stat = [v for v in range(len(im_filenames) + 1)[500:3000] if len(im_filenames) % v == 0]
+#         if len(save_box_stat) == 0:
+#             save_box_stat = len(im_filenames)
+#         else:
+#             save_box_stat = int(save_box_stat[-1])
+        save_box_stat = len(im_filenames) 
         print("saving staticis every %d" % save_box_stat)
         count_stat_for_saving = []
         if use_precalculated_detection != None:
@@ -544,12 +548,12 @@ class TrackCount(object):
                                                                   resize=self.resize)
                     if save_video:
                         video_writer.write((_im_annotate * 255.0).astype('uint8'))
-                if iterr % (25 * 60) == 0:
-                    ou = "%s" % now
-                    for single_key in _result_per_frame:
-                        if "movement_" in single_key:
-                            ou += " %s: %04d" % (single_key.split("movement_")[1], _result_per_frame[single_key])
-                    print(ou)
+#                 if iterr % (25 * 60) == 0:
+#                     ou = "%s" % now
+#                     for single_key in _result_per_frame:
+#                         if "movement_" in single_key:
+#                             ou += " %s: %04d" % (single_key.split("movement_")[1], _result_per_frame[single_key])
+#                     print(ou)
                 if iterr % (save_box_stat - 1) == 0:
                     if iterr != 0 and stat_folder and iterr > 40:
                         video_stat.append([self.pedestrian_id_group, self.bike_id_group, self.car_id_group])

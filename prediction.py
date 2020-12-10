@@ -5,6 +5,7 @@ import yaml
 import matplotlib.pyplot as plt
 from backbone import EfficientDetBackbone
 import utils.utils as input_utils
+import time
 # from utils.utils import preprocess, invert_affine, postprocess
 
 import efficientdet.utils as eff_utils
@@ -31,9 +32,9 @@ def get_parameters(compound_coef, only_person, ckpt_dir, aicity=False):
     else:
         threshold, nms_threshold = 0.5, 0.3
     if aicity:
-        threshold = [0.35 if not ckpt_dir else 0.5][0]
+        threshold = [0.35 if not ckpt_dir else 0.6][0]
     else:
-        threshold = [0.4 if not ckpt_dir else 0.5][0]
+        threshold = [0.4 if not ckpt_dir else 0.6][0]
     print("-----------------------------------------------------------------------------------")
     print("----Get parameter for EfficientDet%d to detect %s-----" % (compound_coef, only_person))
     print("-----------------------------------------------------------------------------------")
@@ -42,7 +43,7 @@ def get_parameters(compound_coef, only_person, ckpt_dir, aicity=False):
         params, model = get_model("coco", compound_coef, None)
     else:
         student = True
-        params, model = get_model("aicity_cam2", compound_coef, ckpt_dir)
+        params, model = get_model("cam11_1", compound_coef, ckpt_dir)
     if aicity == "aicity":
         iou_threshold = [0.15 for _ in range(3)]
     else:
@@ -126,27 +127,76 @@ def find_ooi(preds, ooi, filter_small_box, x_y_threshold, student):
         scores = scores[ooi_id]
         class_ids = class_ids[ooi_id]
         return class_ids, scores, rois
+    
+    
+def get_inference_speed(batch_size, compound_coef):
+    import os
+    import cv2
+    impath = "/home/jovyan/bo/dataset/CAM11_1/Nov_27_2020/Sequence_0000/"
+    frames = [impath + v for v in sorted(os.listdir(impath)) if '.jpg' in v][:400]
+    num_iter = len(frames) // batch_size
+    time_preprocess, time_prediction = 0.0, 0.0
+    params, model = get_model("coco", compound_coef, None)
+    threshold = 0.6
+    nms_threshold = 0.3
+    old_image_shape = np.shape(cv2.imread(frames[0]))[:2]
+    imsize = input_sizes[compound_coef]
+    mean, std =  params['mean'], params['std']
+    only_detection =True
+    with torch.no_grad():
+        for i in range(num_iter):
+            time_init = time.time()
+            filenames = frames[i * batch_size : (i+1) * batch_size]
+            orig_im, framed_im, framed_metas = [], [], []
+            for single_im in filenames:
+                _s_orig_im, _s_framed_im, \
+                    _s_framed_metas = input_utils.preprocess_ts(single_im, old_image_shape=old_image_shape,
+                                                                max_size=imsize, mean=mean, std=std, 
+                                                                only_detection=only_detection)
+                orig_im.append(_s_orig_im)
+                framed_im.append(_s_framed_im)
+                framed_metas.append(_s_framed_metas)
+            im_fake = torch.cat(framed_im, dim=0).to(device)
+            time_mid = time.time()
+            regression, classification, anchors = model.forward_test(im_fake)
+            preds = input_utils.postprocess(anchors, regression, 
+                                            classification, threshold, nms_threshold)
+            preds = input_utils.invert_affine(framed_metas, preds)
+            time_prediction += (time.time() - time_mid)
+            time_preprocess += (time_mid - time_init)
+
+        print("=========================================================")
+        print("Preprocess fps", len(frames)/time_preprocess)
+        print("Prediction fps", len(frames)/time_prediction)
+        print("=========================================================")
+    
 
 
 def get_prediction_batch(images, imsize, mean, std, background, model, threshold, nms_threshold, 
                          regressboxes, clipboxes, ooi, student=False,
                          filter_small_box=True, x_y_threshold=[959, 0], roi_interest=[],
-                         only_detection=True):
+                         only_detection=True, old_image_shape=[]):
     orig_im, framed_im, framed_metas = [],[], []
+    time_init = time.time()
     for single_im in images:
         _s_orig_im, _s_framed_im, \
-            _s_framed_metas = input_utils.preprocess_ts(single_im, max_size=imsize,
-                                                     mean=mean, std=std, only_detection=only_detection)
+            _s_framed_metas = input_utils.preprocess_ts(single_im, old_image_shape=old_image_shape,
+                                                        max_size=imsize, mean=mean, std=std, 
+                                                        only_detection=only_detection)
         orig_im.append(_s_orig_im)
         framed_im.append(_s_framed_im)
         framed_metas.append(_s_framed_metas)
     framed_im = torch.cat(framed_im, dim=0).to(device)
-    regression, classification, anchors = model.forward(framed_im)
+    if len(roi_interest) > 0:
+        framed_im = framed_im.mul(roi_interest)
+    time_mid = time.time()
+    regression, classification, anchors = model.forward_test(framed_im)
     preds = input_utils.postprocess(anchors, regression, 
                                     classification, threshold, nms_threshold)
     preds = input_utils.invert_affine(framed_metas, preds)
     preds_ooi = [find_ooi(v, ooi, filter_small_box, x_y_threshold, student) for v in preds]
-    return preds_ooi, _s_framed_metas
+    time_post = time.time() - time_mid
+    return preds_ooi, _s_framed_metas, [time_mid - time_init, time_post]
 
 
 def get_prediction_ts(image, imsize, mean, std, background, model, threshold, nms_threshold,
@@ -155,147 +205,11 @@ def get_prediction_ts(image, imsize, mean, std, background, model, threshold, nm
     orig_im, framed_im, framed_metas = input_utils.preprocess_ts(image, max_size=imsize, 
                                                                  mean=mean, std=std)
     framed_im = framed_im.to(device)
-    regression, classification, anchors = model.forward(framed_im)
+    regression, classification, anchors = model.forward_test(framed_im)
     preds = input_utils.postprocess(anchors, regression, 
                                     classification, threshold, nms_threshold)
     preds = input_utils.invert_affine([framed_metas], preds)
     preds_ooi = [find_ooi(v, ooi, filter_small_box, x_y_threshold, student) for v in preds]
     return preds_ooi[0], [framed_metas], orig_im # [ classids, scores, rois]
         
-
-def get_prediction(im_filename, imsize, mean, std, background, model, threshold, nms_threshold,
-                   regressboxes, clipboxes, only_person, student=False,
-                   input_filenames=True, filter_small_box=True,
-                   x_y_threshold=[959, 0], roi_interest=[], minus_bg_norm=False):
-    """Give predictions based on the model
-    """
-    ori_imgs, framed_imgs, framed_metas = input_utils.preprocess(im_filename, max_size=imsize,
-                                                     mean=mean, std=std, background=background,
-                                                     input_filenames=input_filenames,
-                                                     resize=False, roi_interest=roi_interest,
-                                                     minus_bg_norm=minus_bg_norm)
-    x = torch.from_numpy(framed_imgs[0])
-    x = x.to(device)
-    x = x.unsqueeze(0).permute(0, 3, 1, 2)
-    q = ori_imgs[0][:, :, :]  # /255.0
-    features, regression, classification, anchors = model.forward(x)
-    preds = input_utils.postprocess(x, anchors, regression, classification,
-                        regressboxes, clipboxes,
-                        threshold, nms_threshold)
-    orig_rois = preds[0]["rois"].copy()  # this is on the input scale
-    preds = input_utils.invert_affine(framed_metas, preds)[0]
-    index = preds["index"]
-    scores = preds["scores"]
-    class_ids = preds["class_ids"]
-    rois = preds["rois"]  # this is on the actual image scale
-    if only_person is not "every":
-        if only_person is "person":
-            person_id = np.where(class_ids == 0)[0]
-        elif only_person is "car":
-            if student:
-                person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [0, 1]])
-            else:
-                person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [2, 7]])
-            class_ids = np.ones(len(class_ids))
-        elif only_person is "caronly":
-            person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [2]])
-            class_ids = np.ones(len(class_ids))
-        elif only_person is "car_truck":
-            if not student:
-                person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [2, 7]])
-                class_ids[class_ids == 2] = 0
-                class_ids[class_ids == 7] = 1
-            else:
-                person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [0, 1]])
-
-        elif only_person is "ped_car":
-            if not student:
-                person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [0, 2, 7]])
-                class_ids[class_ids == 2] = 1
-                class_ids[class_ids == 7] = 1
-            else:
-                person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [0, 1]])
-        elif only_person is "all":
-            person_id = np.array([_i for _i, _id in enumerate(class_ids) if _id in [0, 1, 2, 5, 7]])
-            class_ids[class_ids == 1] = 3
-            class_ids[class_ids == 2] = 1
-            class_ids[class_ids == 5] = 1
-            class_ids[class_ids == 7] = 1
-
-        if len(person_id) > 0 and len(rois) > 0 and only_person is not "car_truck":
-            if filter_small_box:
-                scale = (rois[person_id, 2] - rois[person_id, 0]) * (rois[person_id, 3] - rois[person_id, 1])
-                num_select = np.where(scale > 2500)[0]
-                person_id = person_id[num_select]
-            if len(x_y_threshold) > 0:
-                _index = np.where(np.logical_and(rois[person_id][:, 3] >= x_y_threshold[1],
-                                                 rois[person_id][:, 2] <= x_y_threshold[0]))[0]
-                if len(_index) > 0:
-                    person_id = person_id[_index]
-                if len(_index) == 0 or len(person_id) == 0:
-                    person_id = []
-        elif only_person is "car_truck" and len(person_id) != 0 and len(x_y_threshold) > 0:
-            _index = np.where(np.logical_and(rois[person_id][:, 3] >= x_y_threshold[1],
-                                             rois[person_id][:, 2] <= x_y_threshold[0]))[0]
-            if len(_index) > 0:
-                person_id = person_id[_index]
-            if len(_index) == 0 or len(person_id) == 0:
-                person_id = []
-        elif len(person_id) == 0:
-            person_id = []
-        if len(rois) > 0:
-            rois = rois[person_id]
-            index = index[person_id]
-            scores = scores[person_id]
-            orig_rois = orig_rois[person_id]
-            class_ids = class_ids[person_id]
-            
-    output_stat = [[], rois, orig_rois, scores, index, framed_metas, class_ids]
-
-    return output_stat, q
-
-
-def predict_single_image(im_path, model, compound_coef,
-                         use_background=False, ooi="car", show=True,
-                         student=False, filter_small_box=True,
-                         x_y_threshold=[959, 0], roi_interest=[], minus_bg_norm=False):
-    threshold = 0.3
-    nms_threshold = 0.5
-    if use_background is False or np.sum(use_background) == 0:
-        mean_ = (0.406, 0.456, 0.485)
-        std_ = (0.225, 0.224, 0.229)
-        background = [0.0, 0.0, 0.0]
-    else:
-        if minus_bg_norm:
-            mean_ = (0.406, 0.456, 0.485)
-            std_ = (0.225, 0.224, 0.229)
-        else:
-            mean_ = (0.0, 0.0, 0.0)
-            std_ = (1.0, 1.0, 1.0)
-        background = use_background
-        print("----subtracting the background from the input image........")
-        print(mean_, std_, np.max(background), np.min(background))
-    regressboxes = eff_utils.BBoxTransform()
-    clipboxes = eff_utils.ClipBoxes()
-    input_filenames = [True if type(im_path) is str else False][0]
-    [class_ids, scores, rois], framed_metas, im = get_prediction_ts(im_path, 
-                                                                    input_sizes[compound_coef], 
-                                                                    mean_, std_, background, 
-                                                                    model, threshold, nms_threshold,
-                                                                    regressboxes, clipboxes, 
-                                                                    ooi, student=student, 
-                                                                    filter_small_box=filter_small_box,
-                                                                    x_y_threshold=x_y_threshold,
-                                                                    roi_interest=roi_interest)
-
-    print("frame metas", framed_metas)
-    if show is True:
-        print("---prediction status--------")
-        _pred_class = np.unique(class_ids)
-        [print("class id %d: %d" % (i, len(np.where(class_ids == i)[0]))) for i in _pred_class]
-        img_annotate = vt.show_bbox(im, rois, class_ids, "pred")
-        fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_subplot(111)
-        ax.imshow(img_annotate)
-
-    return class_ids, scores, rois
+    
