@@ -1,21 +1,56 @@
-### Efficient multiple traffic modalities counting
+### Student-teacher Learning for Efficient TrafficCounting 
 
-The goal of this repository is to count multiple traffic modalities (car, truck, pedestrians, and cyclists) with a model that is as small as possible while maintaining high accuracy. 
-
-Our counting framework follows detecting, tracking, and counting as shown in the figure below:
-
-![algorithm](imgs/algorithm.png)
+This repository provides the implementation of our paper [Student-teacher Learning for Efficient TrafficCounting on Edge Devices (Bo Li, Sam Leroux, Pieter Simoens)](). The goal of this paper is to count multiple traffic modalities (car, cyclist, pedestrians, and others) with a model that is as small as possible while maintaining a high accuracy. We experimentally show that we achieve similar results as the SToA counting methods with 5x fewer parameters.
+![](frames/counting.gif)
 
 
+#### Installation and preparation
+1. Clone this repo and prepare the environment
+  ```bash
+  git clone https://gitlab.ilabt.imec.be/bobli/STTcount.git
+  cd STTcount
+  ./requirement.sh
+  ```
+2. The pre-defined parameters for the Antwerp dataset can be downloaded from: 
+  ```bash
+  wget 
+  ```
+3. Record frames from Antwerp Smart Zone
+  ```bash
+  python3 utils/record_antwerp.py --camera CAM11_1 --numday 1 --numhour 1 --outputdir path_to_save_data
+  ```
 
-##### Detail
+#### Traffic counting on a toy dataset
+  ```bash
+  python3 inference.py --compound_coef 0 --skip 4
+  ```
 
-- The surveillance video that I used in the tutorial is taken from YouTube (https://www.youtube.com/watch?v=MNn9qKG2UFI&t=6s). The counting result is at: https://drive.google.com/file/d/1IuLCoXZe5OMdSxe3RNbYOAPsPouGrjSA/view?usp=sharing
+#### Student-teacher pipeline for the Antwerp dataset
+Our framework follows: generate labels for object detection with the teacher model --> train a smaller student model with these generated labels --> evaluate the student models --> select the best one to do counting
+  ```bash
+  ./run_teacher_student.sh Antwerp CAM11_1 Nov_27_2020 generate_label 750  7
+  ./run_teacher_student.sh Antwerp CAM11_1 Nov_27_2020 train_student 750 2 ped_car False False Nov_27_2020 0
+  ./run_teacher_student.sh Antwerp CAM11_1 Nov_28_2020 evaluate_student 750 2 ped_car False False Nov_27_2020 0
+  ```
 
-- To get the counting result, run:
-`python3 inference.py --compound_coef 0 --skip 4`
+#### Traffic counting on the Antwerp dataset
+As for the traffic counting, our method follows detecting, tracking, and counting:
+  ```bash
+  ./run_antwerp_count.sh CAM11_1 Dec_09_2020 detect
+  ./run_antwerp_count.sh CAM11_1 Dec_09_2020 track_count
+  ./run_antwerp_count.sh CAM11_1 Dec_09_2020 save_csv
+  ```
 
-##### TODO
+
+
+
+#### Credits:
+- https://www.youtube.com/watch?v=MNn9qKG2UFI&t=6s
+- https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch
+
+
+
+#### TODO
 - [x] traffic counting tutorial 
 - [x] update clean code
 - [x] convert model to onnx

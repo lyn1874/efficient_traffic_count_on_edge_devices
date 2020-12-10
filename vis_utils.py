@@ -58,7 +58,7 @@ def get_video_writer(shape, out_path, name):
     elif "jovyan" in out_path:
         fps_use = 24.0
     else:
-        fps_use = 6.0
+        fps_use = 24.0
     shape_use = (shape[1], shape[0])
     if '.mp4' or '.avi' in out_path:
         out_name = out_path

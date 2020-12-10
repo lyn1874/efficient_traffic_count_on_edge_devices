@@ -1,20 +1,20 @@
 #!/bin/bash
 trap "exit" INT
-project=${1?Error: which project? Antwerp, Toy}
-camera=${2?Error: which camera? CAM11_1, CAM14_4}
-date=${3?Error: which date will i do the detection? Nov_28_2020}
-opt=${4?Error: which operation am I doing?}
-skip=${5?Error: the interval between frames, default 750}
+project=${1?Error: which project am I working on? Antwerp}
+camera=${2?Error: which camera will I use? CAM11_1, CAM14_4}
+date=${3?Error: which date will i use for generating labels/training models/evaluating student models? Nov_28_2020}
+opt=${4?Error: which operation am I doing? generate_label/train_student/evaluate_student}
+skip=${5?Error: default 750. There is no need to evaluate every frame because there are 25 frames per second}
 compound=${6?Error: which compounent will I use? int, 0 to 7}
-ooi=${7:-ped_car}
-subtract_bg=${8:-false}
-head_only=${9:-false}
-traindate=${10:-none}
-version=${11:-0}
-weightpath=${12:-none}
+ooi=${7:-ped_car}  # the class of interest, car/ped_car/person/
+subtract_bg=${8:-false} # subtract (true)/ Not subtract (false) background for training the student models, bool variable
+head_only=${9:-false} # finetune the head (true)/ the whole model (false) for updating the student models
+traindate=${10:-none} # the date that is used to train the student model
+version=${11:-0} # int
 
-datadir=/home/jovyan/bo/dataset/
-logpath=/home/jovyan/bo/exp_data/
+datadir=/home/jovyan/bo/dataset/  # Need to manually define
+logpath=/home/jovyan/bo/exp_data/ # Need to manually define
+
 if [ $opt = train_student ]; then
     weightpath=checkpoints/efficientdet-d$compound.pth
 elif [ $opt = evaluate_student ]; then

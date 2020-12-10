@@ -12,6 +12,8 @@ import efficientdet.track_count as tc
 import efficientdet.utils as eff_utils
 import vis_utils as vu
 import count_class_batch as cc
+
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536]
 
@@ -124,6 +126,7 @@ def run(opt):
         num_frame = len(frames)
         fps_detection = 0.0
         old_image_shape = np.shape(cv2.imread(frames[0]))[:2]
+        print(old_image_shape)
         for i in tqdm(range(num_frame // opt_batch_size)):
             _imsubset = frames[i * opt_batch_size:(i+1)*opt_batch_size]
             time_init = time.time()
@@ -183,7 +186,7 @@ def run(opt):
                                    algo="boundary", return_count=False, return_stat=False, 
                                    jupyter=False, box_standard = [], specify_direc=[], 
                                    return_id_remove=False, predefine_line=predefine_line,
-                                   im_mom=opt.frame_path)
+                                   im_mom=opt.frame_path, segment=[0, 1000])
         
 
 if __name__ == '__main__':
